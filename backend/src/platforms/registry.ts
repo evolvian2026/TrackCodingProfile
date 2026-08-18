@@ -1,21 +1,11 @@
 import type { Platform } from '@prisma/client';
 import { env } from '../config/env.js';
 import { ALL_PLATFORMS } from '../config/platforms.js';
-import { CodeChefAdapter } from './codechef/adapter.js';
-import { CodeforcesAdapter } from './codeforces/adapter.js';
-import { HackerRankAdapter } from './hackerrank/adapter.js';
-import { LeetCodeAdapter } from './leetcode/adapter.js';
+import { LIVE_ADAPTER_FACTORIES } from './liveFactories.js';
 import { MockAdapter } from './mock/mockAdapter.js';
 import type { PlatformAdapter } from './types.js';
 
 export type DataSource = 'mock' | 'live';
-
-const liveFactories: Record<Platform, () => PlatformAdapter> = {
-  LEETCODE: () => new LeetCodeAdapter(),
-  CODECHEF: () => new CodeChefAdapter(),
-  HACKERRANK: () => new HackerRankAdapter(),
-  CODEFORCES: () => new CodeforcesAdapter(),
-};
 
 const instances = new Map<string, PlatformAdapter>();
 
@@ -29,7 +19,7 @@ export function getAdapter(platform: Platform, source: DataSource = env.DATA_SOU
   const existing = instances.get(key);
   if (existing) return existing;
 
-  const adapter = source === 'mock' ? new MockAdapter(platform) : liveFactories[platform]();
+  const adapter = source === 'mock' ? new MockAdapter(platform) : LIVE_ADAPTER_FACTORIES[platform]();
   instances.set(key, adapter);
   return adapter;
 }

@@ -131,7 +131,9 @@ const num = (raw: string | undefined | null): number | null => {
 /** Exported so the parser can be unit-tested against saved HTML fixtures. */
 export function parseCodeChefProfile(html: string, username: string): ParsedCodeChefProfile {
   const rating = num(html.match(/class="rating-number"[^>]*>\s*([\d,]+)/i)?.[1]);
-  const maxRating = num(html.match(/Highest\s*Rating\s*<?[^>]*>?\s*([\d,]+)/i)?.[1]);
+  // Lazy and bounded: a greedy gap backtracks into the number itself and
+  // captures only its trailing digit.
+  const maxRating = num(html.match(/Highest\s*Rating[\s\S]{0,40}?([\d,]+)/i)?.[1]);
   const stars = html.match(/class="rating"[^>]*>\s*(\d+)\s*★/i)?.[1];
 
   const ranks = [...html.matchAll(/<strong>([\d,]+)<\/strong>\s*<br\s*\/?>\s*(Global|Country)\s*Rank/gi)];
@@ -143,7 +145,7 @@ export function parseCodeChefProfile(html: string, username: string): ParsedCode
   }
 
   const problemsSolved =
-    num(html.match(/Total\s*Problems\s*Solved:?\s*<?[^>]*>?\s*([\d,]+)/i)?.[1]) ??
+    num(html.match(/Total\s*Problems\s*Solved[\s\S]{0,40}?([\d,]+)/i)?.[1]) ??
     num(html.match(/Fully\s*Solved\s*\(\s*([\d,]+)\s*\)/i)?.[1]);
 
   const displayName = html.match(/<h1[^>]*class="h2-style"[^>]*>\s*([^<]+?)\s*<\/h1>/i)?.[1]?.trim() ?? null;

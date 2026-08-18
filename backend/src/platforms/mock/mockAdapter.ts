@@ -2,7 +2,8 @@ import type { Difficulty, Platform } from '@prisma/client';
 import { BaseAdapter, type SnapshotParts } from '../base.js';
 import { platformMeta } from '../../config/platforms.js';
 import { normalizeTopic } from '../topics.js';
-import { PlatformFetchError, type NormalizedActivity, type NormalizedContest, type NormalizedProblem, type NormalizedProfile, type NormalizedRanking, type NormalizedRatingPoint, type NormalizedTopic } from '../types.js';
+import { PlatformFetchError, type PlatformAdapter, type NormalizedActivity, type NormalizedContest, type NormalizedProblem, type NormalizedProfile, type NormalizedRanking, type NormalizedRatingPoint, type NormalizedTopic } from '../types.js';
+import { LIVE_ADAPTER_FACTORIES } from '../liveFactories.js';
 import { SeededRandom } from './random.js';
 import { TIER_PROFILE, resolveScenario } from './scenarios.js';
 
@@ -37,15 +38,30 @@ const HR_DOMAINS = ['Problem Solving', 'Algorithms', 'Data Structures', 'Mathema
 export class MockAdapter extends BaseAdapter {
   readonly platform: Platform;
   readonly label: string;
+  /**
+   * The real adapter, used only for its handle syntax rules. Delegating means a
+   * handle accepted in mock mode is exactly a handle accepted in live mode —
+   * otherwise an import validated in development would fail in production.
+   */
+  private readonly rules: PlatformAdapter;
 
   constructor(platform: Platform) {
     super();
     this.platform = platform;
     this.label = `${platformMeta(platform).label} (mock)`;
+    this.rules = LIVE_ADAPTER_FACTORIES[platform]();
   }
 
   buildProfileUrl(username: string): string {
     return platformMeta(this.platform).profileUrl(username);
+  }
+
+  override normalizeUsername(input: string): string {
+    return this.rules.normalizeUsername(input);
+  }
+
+  override validateUsername(username: string): { valid: boolean; reason?: string } {
+    return this.rules.validateUsername(username);
   }
 
   protected async load(username: string): Promise<SnapshotParts> {

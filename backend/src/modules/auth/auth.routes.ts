@@ -2,7 +2,7 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { prisma } from '../../db/prisma.js';
-import { isProd } from '../../config/env.js';
+import { isProd, isTest } from '../../config/env.js';
 import { asyncHandler } from '../../middleware/error.js';
 import { requireAdmin, requireAuth } from '../../middleware/auth.js';
 import { validateBody } from '../../middleware/validate.js';
@@ -11,12 +11,17 @@ import * as auth from './auth.service.js';
 
 const REFRESH_COOKIE = 'tcp_refresh';
 
-/** Brute-force protection on the credential endpoints specifically. */
+/**
+ * Brute-force protection on the credential endpoint specifically — much
+ * stricter than the global API limiter. Disabled under NODE_ENV=test, where
+ * dozens of legitimate logins happen in seconds.
+ */
 const loginLimiter = rateLimit({
   windowMs: 15 * 60_000,
   limit: 10,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
+  skip: () => isTest,
   message: { error: { code: 'RATE_LIMITED', message: 'Too many sign-in attempts. Try again in a few minutes.' } },
 });
 
