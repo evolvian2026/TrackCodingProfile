@@ -1,0 +1,589 @@
+// Competitive Programming Student Performance Tracker — data model
+// See docs/ARCHITECTURE.md for the reasoning behind this schema.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  ADMIN
+  TRAINER
+  VIEWER
+}
+
+enum Platform {
+  LEETCODE
+  CODECHEF
+  HACKERRANK
+  CODEFORCES
+}
+
+/// Why a piece of data is (or is not) present. `0` and `unknown` are never
+/// conflated: a metric is only a number when the platform actually reported it.
+enum DataStatus {
+  PENDING
+  AVAILABLE
+  NOT_FOUND
+  PRIVATE
+  UNAVAILABLE
+  ERROR
+  RATE_LIMITED
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+  UNKNOWN
+}
+
+enum JobType {
+  UPLOAD_IMPORT
+  REFRESH_SELECTED
+  REFRESH_BATCH
+  REFRESH_ALL
+  REFRESH_PLATFORM
+  RETRY_FAILED
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  COMPLETED_WITH_ERRORS
+  FAILED
+  CANCELLED
+}
+
+enum JobItemStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  RATE_LIMITED
+  SKIPPED
+}
+
+enum SkillLevel {
+  NONE
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+  EXPERT
+}
+
+// ---------------------------------------------------------------------------
+// Auth
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  name         String
+  role         Role      @default(VIEWER)
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  uploads         UploadBatch[]
+  processingJobs  ProcessingJob[]
+  refreshTokens   RefreshToken[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// ---------------------------------------------------------------------------
+// Students
+// ---------------------------------------------------------------------------
+
+model Student {
+  id         String   @id @default(cuid())
+  /// Institution-issued identifier from the uploaded spreadsheet.
+  studentId  String   @unique
+  name       String
+  email      String?
+  phone      String?
+  university String?
+  college    String?
+  batch      String?
+  branch     String?
+  section    String?
+  isActive   Boolean  @default(true)
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  profiles        PlatformProfile[]
+  solvedProblems  StudentProblem[]
+  topics          StudentTopic[]
+  contestResults  ContestResult[]
+  ratingHistory   RatingHistory[]
+  snapshots       DataSnapshot[]
+  jobItems        ProcessingJobItem[]
+  errors          PlatformError[]
+  analytics       StudentAnalytics?
+  skills          StudentSkill[]
+
+  @@index([college])
+  @@index([batch])
+  @@index([branch])
+  @@index([section])
+  @@index([university])
+  @@index([name])
+  @@index([email])
+  @@map("students")
+}
+
+// ---------------------------------------------------------------------------
+// Platform profiles (normalized across all four platforms)
+// ---------------------------------------------------------------------------
+
+model PlatformProfile {
+  id        String   @id @default(cuid())
+  studentId String
+  platform  Platform
+  username  String
+  profileUrl String?
+
+  status        DataStatus @default(PENDING)
+  statusMessage String?
+  lastFetchedAt DateTime?
+  lastSuccessAt DateTime?
+  fetchDurationMs Int?
+
+  // Identity ---------------------------------------------------------------
+  displayName String?
+  country     String?
+  avatarUrl   String?
+
+  // Rating / ranking -------------------------------------------------------
+  rating       Int?
+  maxRating    Int?
+  rankTitle    String?
+  maxRankTitle String?
+  globalRank   Int?
+  countryRank  Int?
+  stars        String?
+  reputation   Int?
+  contribution Int?
+  friendCount  Int?
+
+  // Problem counts ---------------------------------------------------------
+  totalSolved         Int?
+  easySolved          Int?
+  mediumSolved        Int?
+  hardSolved          Int?
+  problemsAttempted   Int?
+  totalSubmissions    Int?
+  acceptedSubmissions Int?
+  acceptanceRate      Float?
+
+  // Contests ---------------------------------------------------------------
+  contestsAttended     Int?
+  contestRating        Int?
+  contestGlobalRanking Int?
+  contestTopPercentage Float?
+
+  // Platform specific, kept as JSON so adapters can evolve independently ----
+  problemSolvingScore Float?
+  badges       Json?
+  certificates Json?
+  skills       Json?
+  domains      Json?
+  raw          Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, platform])
+  @@index([platform, status])
+  @@index([platform, username])
+  @@index([rating])
+  @@index([totalSolved])
+  @@map("platform_profiles")
+}
+
+// ---------------------------------------------------------------------------
+// Problems / topics
+// ---------------------------------------------------------------------------
+
+model Problem {
+  id         String     @id @default(cuid())
+  platform   Platform
+  externalId String
+  name       String
+  url        String?
+  difficulty Difficulty @default(UNKNOWN)
+  /// Platform-native rating for the problem where one exists (e.g. Codeforces).
+  points     Int?
+  createdAt  DateTime   @default(now())
+
+  topics         ProblemTopic[]
+  studentSolves  StudentProblem[]
+
+  @@unique([platform, externalId])
+  @@index([platform, difficulty])
+  @@map("problems")
+}
+
+model Topic {
+  id   String @id @default(cuid())
+  /// Canonical topic name after normalization (e.g. "Dynamic Programming").
+  name String @unique
+  slug String @unique
+
+  problems ProblemTopic[]
+
+  @@map("topics")
+}
+
+model ProblemTopic {
+  problemId String
+  topicId   String
+
+  problem Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  topic   Topic   @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@id([problemId, topicId])
+  @@index([topicId])
+  @@map("problem_topics")
+}
+
+model StudentProblem {
+  id        String   @id @default(cuid())
+  studentId String
+  problemId String
+  platform  Platform
+  solvedAt  DateTime?
+  attempts  Int?
+  createdAt DateTime @default(now())
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  problem Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, problemId])
+  @@index([studentId, platform])
+  @@index([studentId, solvedAt])
+  @@map("student_problems")
+}
+
+/// Per-student aggregated topic counts. Platforms usually expose topic totals
+/// directly (without a full problem list), so this is stored as its own fact
+/// table rather than derived from `student_problems`.
+model StudentTopic {
+  id            String   @id @default(cuid())
+  studentId     String
+  platform      Platform
+  topic         String
+  problemsSolved Int
+  updatedAt     DateTime @updatedAt
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, platform, topic])
+  @@index([topic])
+  @@index([studentId])
+  @@map("student_topics")
+}
+
+// ---------------------------------------------------------------------------
+// Contests & ratings
+// ---------------------------------------------------------------------------
+
+model Contest {
+  id         String   @id @default(cuid())
+  platform   Platform
+  externalId String
+  name       String
+  startTime  DateTime?
+  url        String?
+  createdAt  DateTime @default(now())
+
+  results ContestResult[]
+
+  @@unique([platform, externalId])
+  @@index([platform, startTime])
+  @@map("contests")
+}
+
+model ContestResult {
+  id             String   @id @default(cuid())
+  studentId      String
+  contestId      String
+  platform       Platform
+  rank           Int?
+  ratingBefore   Int?
+  ratingAfter    Int?
+  ratingChange   Int?
+  problemsSolved Int?
+  participatedAt DateTime?
+  createdAt      DateTime @default(now())
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  contest Contest @relation(fields: [contestId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, contestId])
+  @@index([studentId, platform])
+  @@index([studentId, participatedAt])
+  @@map("contest_results")
+}
+
+model RatingHistory {
+  id         String   @id @default(cuid())
+  studentId  String
+  platform   Platform
+  rating     Int
+  recordedAt DateTime
+  /// "contest" when derived from a contest result, "snapshot" when sampled.
+  source     String   @default("snapshot")
+  contestName String?
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, platform, recordedAt, source])
+  @@index([studentId, platform, recordedAt])
+  @@map("rating_history")
+}
+
+// ---------------------------------------------------------------------------
+// Historical snapshots
+// ---------------------------------------------------------------------------
+
+/// Point-in-time copy of a student's headline metrics. Never overwritten, so
+/// growth over time can be charted.
+model DataSnapshot {
+  id         String    @id @default(cuid())
+  studentId  String
+  /// null = combined/aggregate snapshot across every platform.
+  platform   Platform?
+  capturedAt DateTime  @default(now())
+
+  totalSolved      Int?
+  easySolved       Int?
+  mediumSolved     Int?
+  hardSolved       Int?
+  rating           Int?
+  maxRating        Int?
+  globalRank       Int?
+  contestsAttended Int?
+  topicCount       Int?
+  cpScore          Float?
+  metrics          Json?
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId, platform, capturedAt])
+  @@index([capturedAt])
+  @@map("data_snapshots")
+}
+
+// ---------------------------------------------------------------------------
+// Ingestion & processing
+// ---------------------------------------------------------------------------
+
+model UploadBatch {
+  id           String   @id @default(cuid())
+  originalName String
+  storedPath   String?
+  sizeBytes    Int
+  sheetName    String?
+  totalRows    Int      @default(0)
+  validRows    Int      @default(0)
+  invalidRows  Int      @default(0)
+  duplicateRows Int     @default(0)
+  createdCount Int      @default(0)
+  updatedCount Int      @default(0)
+  mapping      Json?
+  headers      Json?
+  issues       Json?
+  status       String   @default("PENDING")
+  uploadedById String?
+  createdAt    DateTime @default(now())
+
+  uploadedBy User?           @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  jobs       ProcessingJob[]
+
+  @@index([createdAt])
+  @@map("upload_batches")
+}
+
+model ProcessingJob {
+  id            String    @id @default(cuid())
+  /// Human-friendly sequential number shown in the UI ("Job #124").
+  number        Int       @unique @default(autoincrement())
+  type          JobType
+  status        JobStatus @default(QUEUED)
+  platforms     Platform[]
+  totalStudents Int       @default(0)
+  totalItems    Int       @default(0)
+  processed     Int       @default(0)
+  successful    Int       @default(0)
+  failed        Int       @default(0)
+  rateLimited   Int       @default(0)
+  skipped       Int       @default(0)
+  currentStudent String?
+  forceRefresh  Boolean   @default(false)
+  error         String?
+  options       Json?
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  createdById   String?
+  uploadBatchId String?
+
+  createdBy   User?        @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  uploadBatch UploadBatch? @relation(fields: [uploadBatchId], references: [id], onDelete: SetNull)
+  items       ProcessingJobItem[]
+  errors      PlatformError[]
+
+  @@index([status, createdAt])
+  @@map("processing_jobs")
+}
+
+model ProcessingJobItem {
+  id         String        @id @default(cuid())
+  jobId      String
+  studentId  String
+  platform   Platform
+  status     JobItemStatus @default(PENDING)
+  attempts   Int           @default(0)
+  lastError  String?
+  dataStatus DataStatus?
+  startedAt  DateTime?
+  finishedAt DateTime?
+  durationMs Int?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  job     ProcessingJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  student Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, studentId, platform])
+  @@index([jobId, status])
+  @@index([status])
+  @@map("processing_job_items")
+}
+
+model PlatformError {
+  id         String     @id @default(cuid())
+  studentId  String?
+  jobId      String?
+  platform   Platform
+  status     DataStatus
+  message    String
+  context    Json?
+  occurredAt DateTime   @default(now())
+
+  student Student?       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  job     ProcessingJob? @relation(fields: [jobId], references: [id], onDelete: SetNull)
+
+  @@index([platform, occurredAt])
+  @@index([studentId])
+  @@index([jobId])
+  @@map("platform_errors")
+}
+
+// ---------------------------------------------------------------------------
+// Derived analytics (materialized so leaderboards stay fast at 10k+ students)
+// ---------------------------------------------------------------------------
+
+model StudentAnalytics {
+  studentId String @id
+
+  totalSolved     Int   @default(0)
+  easySolved      Int   @default(0)
+  mediumSolved    Int   @default(0)
+  hardSolved      Int   @default(0)
+  platformsActive Int   @default(0)
+  totalContests   Int   @default(0)
+  bestRank        Int?
+  avgRank         Float?
+  bestRating      Int?
+  currentRating   Int?
+  topicCount      Int   @default(0)
+  topicCoverage   Float @default(0)
+  cpScore         Float @default(0)
+  scoreBreakdown  Json?
+  /// Set when no platform returned usable data — keeps "unknown" out of rankings.
+  hasData         Boolean @default(false)
+  computedAt      DateTime @default(now())
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([cpScore])
+  @@index([totalSolved])
+  @@index([currentRating])
+  @@map("student_analytics")
+}
+
+model StudentSkill {
+  id             String     @id @default(cuid())
+  studentId      String
+  topic          String
+  level          SkillLevel
+  score          Float
+  problemsSolved Int
+  platformCount  Int        @default(0)
+  updatedAt      DateTime   @updatedAt
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, topic])
+  @@index([studentId])
+  @@map("student_skills")
+}
+
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
+
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+
+  @@map("app_settings")
+}
+
+/// Response cache for platform fetches, so a refresh of 10k students does not
+/// re-hit a platform for data that is still fresh.
+model PlatformCache {
+  key       String   @id
+  platform  Platform
+  payload   Json
+  status    DataStatus
+  fetchedAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([platform, expiresAt])
+  @@map("platform_cache")
+}
