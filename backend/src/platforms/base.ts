@@ -15,6 +15,7 @@ import {
   type PlatformAdapter,
   type PlatformResult,
   type PlatformSnapshot,
+  type FetchOptions,
 } from './types.js';
 
 export interface SnapshotParts {
@@ -25,11 +26,6 @@ export interface SnapshotParts {
   ratings: PlatformResult<NormalizedRatingPoint[]>;
   ranking: PlatformResult<NormalizedRanking>;
   recentActivity: PlatformResult<NormalizedActivity[]>;
-}
-
-export interface FetchOptions {
-  /** Skip the response cache and go straight to the platform. */
-  force?: boolean;
 }
 
 /**

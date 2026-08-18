@@ -152,7 +152,12 @@ export interface PlatformAdapter {
   getRecentActivity(username: string): Promise<PlatformResult<NormalizedActivity[]>>;
 
   /** Fetch everything in one coordinated pass (adapters may share one request). */
-  fetchAll(username: string): Promise<PlatformSnapshot>;
+  fetchAll(username: string, options?: FetchOptions): Promise<PlatformSnapshot>;
+}
+
+export interface FetchOptions {
+  /** Skip the response cache and go straight to the platform. */
+  force?: boolean;
 }
 
 /** Thrown inside adapters; carries the DataStatus that should be persisted. */

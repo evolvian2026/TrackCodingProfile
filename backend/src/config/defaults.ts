@@ -39,12 +39,17 @@ export interface ScoringTargets {
   difficultyPoints: { easy: number; medium: number; hard: number; unknown: number };
 }
 
+/**
+ * Calibrated so a strong final-year student (~900 solved, ~40 contests, ~1750
+ * rating, ~18 topics across platforms) lands in the high 70s rather than
+ * pinning at 100 — otherwise the top of the leaderboard stops discriminating.
+ */
 export const DEFAULT_SCORING_TARGETS: ScoringTargets = {
-  problemsSolvedTarget: 600,
-  difficultyPointsTarget: 1200,
-  contestsTarget: 40,
-  ratingTarget: 2000,
-  topicsTarget: 25,
+  problemsSolvedTarget: 1100,
+  difficultyPointsTarget: 2200,
+  contestsTarget: 55,
+  ratingTarget: 2100,
+  topicsTarget: 28,
   difficultyPoints: { easy: 1, medium: 3, hard: 6, unknown: 1.5 },
 };
 

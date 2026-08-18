@@ -2,7 +2,7 @@ import type { Difficulty, Platform } from '@prisma/client';
 import { BaseAdapter, type SnapshotParts } from '../base.js';
 import { platformMeta } from '../../config/platforms.js';
 import { normalizeTopic } from '../topics.js';
-import { PlatformFetchError, type NormalizedActivity, type NormalizedContest, type NormalizedProblem, type NormalizedProfile, type NormalizedRatingPoint, type NormalizedTopic } from '../types.js';
+import { PlatformFetchError, type NormalizedActivity, type NormalizedContest, type NormalizedProblem, type NormalizedProfile, type NormalizedRanking, type NormalizedRatingPoint, type NormalizedTopic } from '../types.js';
 import { SeededRandom } from './random.js';
 import { TIER_PROFILE, resolveScenario } from './scenarios.js';
 
@@ -10,8 +10,14 @@ const TOPIC_POOL = [
   'Arrays', 'Strings', 'Dynamic Programming', 'Graphs', 'Trees', 'Binary Search', 'Greedy',
   'Backtracking', 'Linked List', 'Stack', 'Queue', 'Math', 'Sorting', 'Hash Table',
   'Two Pointers', 'Bit Manipulation', 'Heap', 'Recursion', 'Number Theory', 'Matrix',
-  'Sliding Window', 'Union Find', 'Trie', 'Geometry', 'Game Theory',
+  'Sliding Window', 'Union Find', 'Trie', 'Geometry', 'Game Theory', 'Prefix Sum',
+  'Depth-First Search', 'Breadth-First Search', 'Shortest Path', 'Topological Sort',
+  'Segment Tree', 'Combinatorics', 'Divide and Conquer', 'Simulation', 'Implementation',
+  'Constructive Algorithms', 'Brute Force', 'String Matching', 'Probability', 'Data Structures',
 ];
+
+/** No single platform covers everything, so each is capped well below the pool. */
+const MAX_TOPICS_PER_PLATFORM = 16;
 
 const PROBLEM_WORDS = [
   'Two Sum', 'Longest Substring', 'Median of Arrays', 'Valid Parentheses', 'Merge Intervals',
@@ -66,15 +72,20 @@ export class MockAdapter extends BaseAdapter {
       .filter((c) => c.startTime && c.ratingAfter != null)
       .map((c) => ({ rating: c.ratingAfter!, recordedAt: c.startTime!, contestName: c.name }));
 
+    // HackerRank publishes no rating, no ranking and no contest history — the
+    // mock has to reproduce those gaps or the UI gets developed against data
+    // that will never exist in production.
+    const hasRating = this.platform !== 'HACKERRANK';
+
     const profile: NormalizedProfile = {
       username,
       profileUrl: this.buildProfileUrl(username),
       displayName: null,
       country: rng.pick(['India', 'India', 'India', 'United States', null]),
       avatarUrl: null,
-      rating,
-      maxRating: rating + rng.int(0, 180),
-      globalRank: rng.int(1_000, 900_000),
+      rating: hasRating ? rating : null,
+      maxRating: hasRating ? rating + rng.int(0, 180) : null,
+      globalRank: hasRating ? rng.int(1_000, 900_000) : null,
       countryRank: this.platform === 'CODECHEF' ? rng.int(100, 200_000) : null,
       stars: this.platform === 'CODECHEF' ? `${Math.min(7, Math.max(1, Math.floor((rating - 1000) / 200) + 1))}★` : null,
       rankTitle: this.platform === 'CODEFORCES' ? codeforcesRank(rating) : null,
@@ -111,12 +122,14 @@ export class MockAdapter extends BaseAdapter {
       topics: meta.hasTopics ? this.ok(topics) : this.notPublic<NormalizedTopic[]>('topic-wise breakdowns'),
       contests: meta.hasContests && contests.length > 0 ? this.ok(contests) : this.notPublic<NormalizedContest[]>('contest results'),
       ratings: meta.hasContests && ratings.length > 0 ? this.ok(ratings) : this.notPublic<NormalizedRatingPoint[]>('a rating history'),
-      ranking: this.ok({
-        globalRank: profile.globalRank ?? null,
-        countryRank: profile.countryRank ?? null,
-        rankTitle: profile.rankTitle ?? profile.stars ?? null,
-        topPercentage: profile.contestTopPercentage ?? null,
-      }),
+      ranking: hasRating
+        ? this.ok({
+            globalRank: profile.globalRank ?? null,
+            countryRank: profile.countryRank ?? null,
+            rankTitle: profile.rankTitle ?? profile.stars ?? null,
+            topPercentage: profile.contestTopPercentage ?? null,
+          })
+        : this.notPublic<NormalizedRanking>('global or country ranking'),
       recentActivity:
         this.platform === 'HACKERRANK' || this.platform === 'CODECHEF'
           ? this.notPublic<NormalizedActivity[]>('a recent-activity feed')
@@ -134,7 +147,7 @@ function splitDifficulty(total: number, rng: SeededRandom) {
 }
 
 function buildTopics(total: number, rng: SeededRandom): NormalizedTopic[] {
-  const count = Math.min(TOPIC_POOL.length, Math.max(3, Math.round(total / 22) + rng.int(2, 6)));
+  const count = Math.min(MAX_TOPICS_PER_PLATFORM, Math.max(3, Math.round(total / 22) + rng.int(2, 6)));
   const chosen = [...TOPIC_POOL].sort(() => rng.next() - 0.5).slice(0, count);
   let remaining = total;
   const topics: NormalizedTopic[] = [];

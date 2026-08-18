@@ -46,10 +46,15 @@ export function resolveScenario(username: string): MockScenario {
   return { status: 'AVAILABLE', tier: 'average' };
 }
 
+/**
+ * Per-platform ranges. A student is usually active on 2-4 platforms, so the
+ * aggregate a tier produces is roughly these numbers multiplied by that count —
+ * the ranges are chosen so the totals stay in a believable range.
+ */
 export const TIER_PROFILE: Record<PerformanceTier, { solvedRange: [number, number]; ratingRange: [number, number]; contestRange: [number, number] }> = {
-  elite: { solvedRange: [700, 1400], ratingRange: [1900, 2450], contestRange: [45, 95] },
-  high: { solvedRange: [350, 700], ratingRange: [1600, 1950], contestRange: [25, 55] },
-  average: { solvedRange: [120, 350], ratingRange: [1250, 1600], contestRange: [8, 28] },
-  beginner: { solvedRange: [15, 120], ratingRange: [900, 1250], contestRange: [0, 8] },
-  inactive: { solvedRange: [0, 15], ratingRange: [800, 950], contestRange: [0, 2] },
+  elite: { solvedRange: [300, 700], ratingRange: [1900, 2450], contestRange: [25, 60] },
+  high: { solvedRange: [180, 400], ratingRange: [1600, 1950], contestRange: [15, 35] },
+  average: { solvedRange: [70, 180], ratingRange: [1250, 1600], contestRange: [5, 20] },
+  beginner: { solvedRange: [10, 70], ratingRange: [900, 1250], contestRange: [0, 6] },
+  inactive: { solvedRange: [0, 12], ratingRange: [800, 950], contestRange: [0, 2] },
 };
