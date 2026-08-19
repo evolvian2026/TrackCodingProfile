@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Download, ExternalLink, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Download, ExternalLink, Pencil, RefreshCw } from 'lucide-react';
 import { studentsApi } from '../api/endpoints';
 import { downloadFile, errorMessage } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
@@ -11,6 +11,7 @@ import {
   SkillBadge, StatCard, StatusBadge, Tabs, useToast,
 } from '../components/ui';
 import { CategoryBars, CompositionBar, MultiLineChart, ScoreGauge } from '../components/charts';
+import { StudentEditModal } from '../components/StudentEditModal';
 import { decimal, formatDate, num, ordinalRank, percent, relativeTime, STATUS_PRESENTATION } from '../lib/format';
 import { difficultyColor } from '../lib/palette';
 import type { PlatformProfile, StudentSkill } from '../types/api';
@@ -24,6 +25,7 @@ export default function StudentDetailPage() {
   const { notify } = useToast();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<TabId>('overview');
+  const [editing, setEditing] = useState(false);
 
   const student = useQuery({ queryKey: ['student', id], queryFn: () => studentsApi.detail(id) });
 
@@ -73,10 +75,16 @@ export default function StudentDetailPage() {
         actions={
           <>
             {can('TRAINER') && (
-              <button type="button" className="btn-secondary" disabled={refresh.isPending} onClick={() => refresh.mutate()}>
-                <RefreshCw className={`h-4 w-4 ${refresh.isPending ? 'animate-spin' : ''}`} />
-                Refresh
-              </button>
+              <>
+                <button type="button" className="btn-secondary" disabled={refresh.isPending} onClick={() => refresh.mutate()}>
+                  <RefreshCw className={`h-4 w-4 ${refresh.isPending ? 'animate-spin' : ''}`} />
+                  Refresh
+                </button>
+                <button type="button" className="btn-secondary" onClick={() => setEditing(true)}>
+                  <Pencil className="h-4 w-4" />
+                  Edit
+                </button>
+              </>
             )}
             {(['pdf', 'xlsx'] as const).map((format) => (
               <button
@@ -148,6 +156,8 @@ export default function StudentDetailPage() {
           data.platforms.map((profile) => <PlatformCard key={profile.id} profile={profile} />)
         )}
       </div>
+
+      {editing && <StudentEditModal student={data} open={editing} onClose={() => setEditing(false)} />}
 
       <Card>
         <Tabs<TabId>
