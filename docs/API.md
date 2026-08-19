@@ -122,7 +122,7 @@ All analytics endpoints accept the same filter parameters as `/students`.
 |---|---|---|---|
 | GET | `/settings` | any | All settings, defaults and runtime configuration |
 | PATCH | `/settings/:key` | ADMIN | Update a setting; `recompute: true` rebuilds analytics |
-| POST | `/settings/:key/reset` | ADMIN | Restore defaults |
+| POST | `/settings/:key/reset` | ADMIN | Restore defaults; recomputes analytics for scoring keys unless `recompute: false` |
 | GET | `/settings/platforms/meta` | any | Platform capabilities and how each is sourced |
 | POST | `/settings/cache/purge` | ADMIN | Clear cached platform responses |
 

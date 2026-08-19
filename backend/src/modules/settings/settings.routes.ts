@@ -128,10 +128,19 @@ settingsRouter.patch(
 settingsRouter.post(
   '/:key/reset',
   requireAdmin,
+  validateBody(z.object({ recompute: z.boolean().default(true) })),
   asyncHandler(async (req, res) => {
     const key = decodeURIComponent(req.params.key!);
     if (!VALID_KEYS.has(key)) throw badRequest(`Unknown setting "${key}"`);
-    res.json({ data: { key, value: await resetSetting(key as SettingKey) } });
+
+    const value = await resetSetting(key as SettingKey);
+
+    // A reset changes the scores exactly as much as an edit does. Without this
+    // every stored cpScore stays as it was computed under the old weights, and
+    // the leaderboard silently disagrees with the settings that produced it.
+    const recomputed = req.body.recompute && SCORE_AFFECTING.has(key) ? await recomputeAllAnalytics() : undefined;
+
+    res.json({ data: { key, value }, recomputed });
   }),
 );
 

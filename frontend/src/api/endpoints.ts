@@ -144,7 +144,13 @@ export const settingsApi = {
     api.patch<{ data: { key: string; value: Record<string, unknown> }; recomputed?: number }>(
       `/api/settings/${encodeURIComponent(key)}`, { value, recompute },
     ).then((r) => r.data),
-  reset: (key: string) => api.post(`/api/settings/${encodeURIComponent(key)}/reset`).then((r) => r.data),
+  reset: (key: string, recompute = true) =>
+    api
+      .post<{ data: { key: string; value: Record<string, unknown> }; recomputed?: number }>(
+        `/api/settings/${encodeURIComponent(key)}/reset`,
+        { recompute },
+      )
+      .then((r) => r.data),
   platforms: () => api.get<{ data: PlatformMeta[]; dataSource: string }>('/api/settings/platforms/meta').then((r) => r.data),
   purgeCache: (payload: { platform?: Platform; expiredOnly?: boolean }) =>
     api.post<{ removed: number }>('/api/settings/cache/purge', payload).then((r) => r.data),

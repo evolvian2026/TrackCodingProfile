@@ -255,6 +255,37 @@ describe('settings API', () => {
     expect(afterReset.body.data['scoring.weights'].problemsSolved).toBe(30);
   });
 
+  it('recomputes stored scores when a scoring setting is reset', async () => {
+    const student = await seedStudentWithData('9100', 'Reset Subject', 'reset_pro_cf');
+    const token = await tokenFor(ADMIN.email, ADMIN.password);
+    const auth = { Authorization: `Bearer ${token}` };
+
+    const before = await prisma.studentAnalytics.findUniqueOrThrow({ where: { studentId: student.id } });
+
+    // Halve the target so the score jumps, then reset it back.
+    await request(app)
+      .patch('/api/settings/scoring.targets')
+      .set(auth)
+      .send({ value: { problemsSolvedTarget: 50 }, recompute: true })
+      .expect(200);
+    const shifted = await prisma.studentAnalytics.findUniqueOrThrow({ where: { studentId: student.id } });
+    expect(shifted.cpScore).not.toBe(before.cpScore);
+
+    const reset = await request(app).post('/api/settings/scoring.targets/reset').set(auth).send({}).expect(200);
+    expect(reset.body.recomputed).toBeGreaterThan(0);
+
+    // Without a recompute on reset the stored score would still reflect the
+    // old target, and the leaderboard would disagree with the settings.
+    const after = await prisma.studentAnalytics.findUniqueOrThrow({ where: { studentId: student.id } });
+    expect(after.cpScore).toBe(before.cpScore);
+  });
+
+  it('does not recompute when resetting a setting that cannot affect scores', async () => {
+    const token = await tokenFor(ADMIN.email, ADMIN.password);
+    const res = await request(app).post('/api/settings/ui.platformColors/reset').set('Authorization', `Bearer ${token}`).send({}).expect(200);
+    expect(res.body.recomputed).toBeUndefined();
+  });
+
   it('rejects an invalid setting value and an unknown key', async () => {
     const token = await tokenFor(ADMIN.email, ADMIN.password);
     const auth = { Authorization: `Bearer ${token}` };

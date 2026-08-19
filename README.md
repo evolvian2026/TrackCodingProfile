@@ -358,13 +358,13 @@ Two layers: fast tests that need no server, and end-to-end suites that drive the
 running application.
 
 ```bash
-npm test          # 105 unit + integration tests
+npm test          # 107 unit + integration tests
 npm run e2e       # 275 end-to-end checks against a running app
 ```
 
 ### Unit and integration
 
-105 tests covering topic normalization, scoring and skill levels, all four
+107 tests covering topic normalization, scoring and skill levels, all four
 platform parsers, rate limiting and backoff, Excel reading and column mapping,
 row validation, the full upload → process → analytics pipeline against a real
 database, and the REST API including authentication and authorization.
@@ -403,6 +403,10 @@ End-to-end found three more that unit tests structurally could not:
   logged the user out. Every refresh now funnels through one in-flight request.
 - **A malformed request body returned 500.** body-parser rejects unreadable
   bodies before any route runs; those now surface as 400 and 413.
+- **Resetting a scoring setting left every stored score stale.** Saving weights
+  offered a recompute; resetting them did not, so the leaderboard kept showing
+  scores calculated under the old weights with nothing to indicate it. Reset now
+  recomputes exactly as saving does.
 
 ---
 

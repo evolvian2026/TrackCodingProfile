@@ -69,13 +69,20 @@ function RuntimeTile({ label, value, hint }: { label: string; value: string; hin
   );
 }
 
-/** Shared save/reset behaviour for one settings key. */
+/**
+ * Shared save/reset behaviour for one settings key.
+ *
+ * Both paths ask for a recompute by default; the server ignores the request for
+ * keys that do not affect scoring. Saving and resetting must behave the same,
+ * or a reset leaves every stored score computed under the old weights.
+ */
 function useSettingMutation(key: string, options: { recompute?: boolean } = {}) {
   const queryClient = useQueryClient();
   const { notify } = useToast();
+  const recompute = options.recompute ?? true;
 
   const save = useMutation({
-    mutationFn: (value: Record<string, unknown>) => settingsApi.update(key, value, options.recompute),
+    mutationFn: (value: Record<string, unknown>) => settingsApi.update(key, value, recompute),
     onSuccess: (result) => {
       notify(
         result.recomputed !== undefined
@@ -91,10 +98,16 @@ function useSettingMutation(key: string, options: { recompute?: boolean } = {}) 
   });
 
   const reset = useMutation({
-    mutationFn: () => settingsApi.reset(key),
-    onSuccess: () => {
-      notify('Reset to defaults.', 'success');
-      queryClient.invalidateQueries({ queryKey: ['settings'] });
+    // A reset shifts every score just as an edit does, so it recomputes too.
+    mutationFn: () => settingsApi.reset(key, recompute),
+    onSuccess: (result) => {
+      notify(
+        result.recomputed !== undefined
+          ? `Reset to defaults. Recalculated ${result.recomputed} students.`
+          : 'Reset to defaults.',
+        'success',
+      );
+      queryClient.invalidateQueries();
     },
     onError: (error) => notify(errorMessage(error), 'error'),
   });
