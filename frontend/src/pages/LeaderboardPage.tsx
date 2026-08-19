@@ -33,11 +33,19 @@ export default function LeaderboardPage() {
   const sortBy = searchParams.get('sortBy') ?? 'cpScore';
   const sortDir = (searchParams.get('sortDir') ?? 'desc') as 'asc' | 'desc';
 
-  const setParam = (key: string, value: string) =>
+  /**
+   * Applies every change in ONE `setSearchParams` call.
+   *
+   * Two sequential calls in the same handler clobber each other: the second
+   * updater still sees the pre-update location, so the first change is lost —
+   * which silently broke "sort by this column" (the direction changed, the
+   * column did not).
+   */
+  const setParams = (entries: Record<string, string>) =>
     setSearchParams((previous) => {
       const next = new URLSearchParams(previous);
-      next.set(key, value);
-      if (key !== 'page') next.delete('page');
+      for (const [key, value] of Object.entries(entries)) next.set(key, value);
+      if (!('page' in entries)) next.delete('page');
       return next;
     }, { replace: true });
 
@@ -46,13 +54,12 @@ export default function LeaderboardPage() {
     queryFn: () => leaderboardApi.get({ ...params, page, pageSize, sortBy, sortDir }),
   });
 
-  const toggleSort = (key: string) => {
-    if (sortBy === key) setParam('sortDir', sortDir === 'desc' ? 'asc' : 'desc');
-    else {
-      setParam('sortBy', key);
-      setParam('sortDir', 'desc');
-    }
-  };
+  const toggleSort = (key: string) =>
+    setParams(
+      sortBy === key
+        ? { sortDir: sortDir === 'desc' ? 'asc' : 'desc' }
+        : { sortBy: key, sortDir: 'desc' },
+    );
 
   return (
     <>
@@ -163,7 +170,7 @@ export default function LeaderboardPage() {
               totalPages={query.data!.pagination.totalPages}
               total={query.data!.pagination.total}
               pageSize={query.data!.pagination.pageSize}
-              onChange={(next) => setParam('page', String(next))}
+              onChange={(next) => setParams({ page: String(next) })}
             />
           </>
         )}

@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { authApi } from '../api/endpoints';
-import { setAccessToken, setUnauthenticatedHandler } from '../api/client';
+import { refreshSession, setAccessToken, setUnauthenticatedHandler } from '../api/client';
 import type { Role, User } from '../types/api';
 
 interface AuthContextValue {
@@ -19,14 +19,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   // On boot, try the refresh cookie so a reload does not sign the user out.
+  // Goes through the shared single-flight helper: StrictMode invokes this
+  // effect twice, and two racing refreshes would burn the rotating token and
+  // log the user straight back out.
   useEffect(() => {
     let cancelled = false;
-    authApi
-      .refresh()
+    refreshSession()
       .then((result) => {
         if (cancelled) return;
         setAccessToken(result.accessToken);
-        setUser(result.user);
+        setUser(result.user as User);
       })
       .catch(() => {
         if (!cancelled) setUser(null);

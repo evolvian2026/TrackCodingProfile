@@ -29,15 +29,28 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-/** One refresh in flight at a time; everyone else waits for its result. */
-let refreshPromise: Promise<string> | null = null;
+export interface RefreshResult {
+  accessToken: string;
+  user: unknown;
+}
 
-async function refreshAccessToken(): Promise<string> {
+/**
+ * Exactly one refresh in flight at a time; every other caller awaits its result.
+ *
+ * This must be the ONLY path that refreshes. Refresh tokens rotate server-side,
+ * so two concurrent refreshes both present the same token: the first rotates it
+ * and the second is rejected as a replay, which would sign a perfectly valid
+ * user out. That happens easily in practice — React StrictMode double-invokes
+ * the boot effect, and two open tabs do the same thing.
+ */
+let refreshPromise: Promise<RefreshResult> | null = null;
+
+export async function refreshSession(): Promise<RefreshResult> {
   refreshPromise ??= axios
-    .post<{ accessToken: string }>(`${baseURL}/api/auth/refresh`, {}, { withCredentials: true })
+    .post<RefreshResult>(`${baseURL}/api/auth/refresh`, {}, { withCredentials: true })
     .then((res) => {
       accessToken = res.data.accessToken;
-      return res.data.accessToken;
+      return res.data;
     })
     .finally(() => {
       refreshPromise = null;
@@ -54,7 +67,7 @@ api.interceptors.response.use(
     if (error.response?.status === 401 && original && !original._retried && !isAuthCall) {
       original._retried = true;
       try {
-        await refreshAccessToken();
+        await refreshSession();
         return api(original);
       } catch {
         accessToken = null;

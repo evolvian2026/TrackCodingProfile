@@ -25,6 +25,23 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
     });
   }
 
+  // body-parser (express.json / urlencoded) rejects malformed or oversized
+  // bodies by throwing before any route runs. Those errors carry their own
+  // HTTP status; without this they fall through to the 500 branch and a
+  // client's typo looks like a server fault.
+  if (isHttpBodyError(err)) {
+    const status = err.status ?? err.statusCode ?? 400;
+    const message =
+      err.type === 'entity.parse.failed'
+        ? 'The request body is not valid JSON.'
+        : err.type === 'entity.too.large'
+          ? 'The request body is too large.'
+          : 'The request could not be read.';
+    return res.status(status).json({
+      error: { code: status === 413 ? 'PAYLOAD_TOO_LARGE' : 'BAD_REQUEST', message },
+    });
+  }
+
   if (err instanceof multer.MulterError) {
     const message =
       err.code === 'LIMIT_FILE_SIZE' ? 'The uploaded file exceeds the maximum allowed size' : err.message;
@@ -49,6 +66,21 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
       ...(isProd ? {} : { detail: err instanceof Error ? err.message : String(err) }),
     },
   });
+}
+
+interface HttpBodyError extends Error {
+  status?: number;
+  statusCode?: number;
+  type?: string;
+  expose?: boolean;
+}
+
+/** Detects the error shape body-parser throws for an unreadable request body. */
+function isHttpBodyError(err: unknown): err is HttpBodyError {
+  if (!(err instanceof Error)) return false;
+  const candidate = err as HttpBodyError;
+  const status = candidate.status ?? candidate.statusCode;
+  return typeof status === 'number' && status >= 400 && status < 500 && typeof candidate.type === 'string';
 }
 
 /** Wraps an async handler so rejected promises reach the error middleware. */

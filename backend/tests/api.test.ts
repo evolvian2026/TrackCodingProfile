@@ -87,6 +87,17 @@ describe('authentication', () => {
     await request(app).post('/api/auth/refresh').set('Cookie', original).expect(401);
   });
 
+  it('rejects a refresh token that has already been rotated', async () => {
+    const login = await request(app).post('/api/auth/login').send({ email: ADMIN.email, password: ADMIN.password }).expect(200);
+    const cookie = login.headers['set-cookie']!;
+
+    await request(app).post('/api/auth/refresh').set('Cookie', cookie).expect(200);
+    // Rotation is deliberate: a replayed token must not work. The web client
+    // therefore has to funnel every refresh through a single in-flight request,
+    // or two concurrent refreshes would sign a valid user out.
+    await request(app).post('/api/auth/refresh').set('Cookie', cookie).expect(401);
+  });
+
   it('blocks unauthenticated access to protected routes', async () => {
     await request(app).get('/api/students').expect(401);
     await request(app).get('/api/leaderboard').expect(401);
@@ -293,6 +304,31 @@ describe('upload API', () => {
 });
 
 describe('error handling', () => {
+  it('reports a malformed JSON body as 400, not 500', async () => {
+    const token = await tokenFor(ADMIN.email, ADMIN.password);
+    const res = await request(app)
+      .post('/api/students/compare')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Content-Type', 'application/json')
+      .send('{ not valid json')
+      .expect(400);
+    // body-parser throws before any route runs; without explicit handling a
+    // client's typo surfaces as a server fault.
+    expect(res.body.error.code).toBe('BAD_REQUEST');
+    expect(res.body.error.message).toMatch(/not valid JSON/i);
+  });
+
+  it('reports an oversized JSON body as 413', async () => {
+    const token = await tokenFor(ADMIN.email, ADMIN.password);
+    const res = await request(app)
+      .post('/api/students/compare')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Content-Type', 'application/json')
+      .send(JSON.stringify({ ids: ['x'.repeat(2_000_000)] }))
+      .expect(413);
+    expect(res.body.error.code).toBe('PAYLOAD_TOO_LARGE');
+  });
+
   it('returns a structured 404 for an unknown route', async () => {
     const res = await request(app).get('/api/nope').expect(404);
     expect(res.body.error.code).toBe('NOT_FOUND');

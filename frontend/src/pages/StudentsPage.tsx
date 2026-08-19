@@ -34,11 +34,12 @@ export default function StudentsPage() {
   const sortBy = searchParams.get('sortBy') ?? 'cpScore';
   const sortDir = (searchParams.get('sortDir') ?? 'desc') as 'asc' | 'desc';
 
-  const setParam = (key: string, value: string) => {
+  /** One call per change: sequential `setSearchParams` calls overwrite each other. */
+  const setParams = (entries: Record<string, string>) => {
     setSearchParams((previous) => {
       const next = new URLSearchParams(previous);
-      next.set(key, value);
-      if (key !== 'page') next.delete('page');
+      for (const [key, value] of Object.entries(entries)) next.set(key, value);
+      if (!('page' in entries)) next.delete('page');
       return next;
     }, { replace: true });
   };
@@ -121,7 +122,7 @@ export default function StudentsPage() {
 
         <label className="flex flex-col">
           <span className="mb-1 text-2xs font-medium uppercase tracking-wide text-ink-subtle">Sort by</span>
-          <select className="input py-1.5 text-xs" value={sortBy} onChange={(event) => setParam('sortBy', event.target.value)}>
+          <select className="input py-1.5 text-xs" value={sortBy} onChange={(event) => setParams({ sortBy: event.target.value })}>
             {SORT_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
@@ -130,7 +131,7 @@ export default function StudentsPage() {
 
         <label className="flex flex-col">
           <span className="mb-1 text-2xs font-medium uppercase tracking-wide text-ink-subtle">Order</span>
-          <select className="input py-1.5 text-xs" value={sortDir} onChange={(event) => setParam('sortDir', event.target.value)}>
+          <select className="input py-1.5 text-xs" value={sortDir} onChange={(event) => setParams({ sortDir: event.target.value })}>
             <option value="desc">Highest first</option>
             <option value="asc">Lowest first</option>
           </select>
@@ -267,7 +268,7 @@ export default function StudentsPage() {
               totalPages={query.data!.pagination.totalPages}
               total={query.data!.pagination.total}
               pageSize={query.data!.pagination.pageSize}
-              onChange={(next) => setParam('page', String(next))}
+              onChange={(next) => setParams({ page: String(next) })}
             />
           </>
         )}

@@ -354,11 +354,17 @@ platform, difficulty and topic distributions.
 
 ## Testing
 
+Two layers: fast tests that need no server, and end-to-end suites that drive the
+running application.
+
 ```bash
-npm test --workspace=backend
+npm test          # 105 unit + integration tests
+npm run e2e       # 275 end-to-end checks against a running app
 ```
 
-101 tests covering topic normalization, scoring and skill levels, all four
+### Unit and integration
+
+105 tests covering topic normalization, scoring and skill levels, all four
 platform parsers, rate limiting and backoff, Excel reading and column mapping,
 row validation, the full upload → process → analytics pipeline against a real
 database, and the REST API including authentication and authorization.
@@ -370,10 +376,33 @@ Integration tests need a PostgreSQL database; set `TEST_DATABASE_URL` (defaults
 to `postgresql://tcp@127.0.0.1:5432/tcp_test`). The schema is pushed
 automatically. Test files run sequentially because they share that database.
 
-The suite has already earned its keep — it caught a greedy regex in the CodeChef
-parser that captured `7` instead of `1967`, a mock/live handle-validation
-mismatch, and a `NULLS FIRST` ordering bug that floated students with no data to
-the top of every "best first" list.
+### End-to-end
+
+`npm run e2e` needs the app running and a freshly seeded database — see
+[`e2e/README.md`](e2e/README.md). It runs 138 API checks (every endpoint,
+authn/authz, upload → process → retry, reports, error paths) and 137 browser
+checks (every screen, forms, filters, sorting, pagination, the upload wizard,
+modals, downloads, theming, mobile), plus a regression guard for the session
+refresh race.
+
+### What the tests have caught
+
+They have already earned their keep. In the unit layer: a greedy regex in the
+CodeChef parser that captured `7` instead of `1967`, a mock/live
+handle-validation mismatch, and a `NULLS FIRST` ordering bug that floated
+students with no data to the top of every "best first" list.
+
+End-to-end found three more that unit tests structurally could not:
+
+- **Sorting the leaderboard by a column silently did nothing.** Two sequential
+  `setSearchParams` calls in one handler clobbered each other, so the sort
+  direction changed but the column did not.
+- **A valid session could be signed out at random.** Refresh tokens rotate, and
+  the boot refresh bypassed the client's single-flight guard — so two concurrent
+  refreshes (React StrictMode, or simply two open tabs) burned the token and
+  logged the user out. Every refresh now funnels through one in-flight request.
+- **A malformed request body returned 500.** body-parser rejects unreadable
+  bodies before any route runs; those now surface as 400 and 413.
 
 ---
 
