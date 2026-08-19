@@ -186,6 +186,43 @@ describe('upload -> process -> analytics pipeline', () => {
     expect(codechef.easySolved).toBeNull();
   });
 
+  it('marks a metric as unknown when no platform with data publishes it', async () => {
+    // CodeChef publishes a solved total but no difficulty split and no topics.
+    const student = await prisma.student.create({ data: { studentId: '9001', name: 'CodeChef Only' } });
+    await prisma.platformProfile.create({ data: { studentId: student.id, platform: 'CODECHEF', username: 'cc_user' } });
+    const snapshot = await getAdapter('CODECHEF', 'mock').fetchAll('cc_user', { force: true });
+    await ingestSnapshot(student.id, snapshot);
+    await recomputeStudentAnalytics(student.id);
+
+    const analytics = await prisma.studentAnalytics.findUniqueOrThrow({ where: { studentId: student.id } });
+    expect(analytics.hasData).toBe(true);
+    expect(analytics.totalSolved).toBeGreaterThan(0);
+    // The split and the topic count are NOT zero — they are unknown.
+    expect(analytics.difficultyKnown).toBe(false);
+    expect(analytics.topicsKnown).toBe(false);
+    // CodeChef does publish contests.
+    expect(analytics.contestsKnown).toBe(true);
+
+    // The report must print N/A for the unknown metrics rather than 0.
+    const csv = (await generateStudentReport(student.id, 'csv')).buffer.toString();
+    expect(csv).toMatch(/Easy Solved,N\/A/);
+    expect(csv).toMatch(/Distinct Topics,N\/A/);
+    expect(csv).not.toMatch(/Easy Solved,0/);
+  });
+
+  it('marks every metric known for a student on a fully-featured platform', async () => {
+    const student = await prisma.student.create({ data: { studentId: '9002', name: 'Codeforces Only' } });
+    await prisma.platformProfile.create({ data: { studentId: student.id, platform: 'CODEFORCES', username: 'cf_user' } });
+    const snapshot = await getAdapter('CODEFORCES', 'mock').fetchAll('cf_user', { force: true });
+    await ingestSnapshot(student.id, snapshot);
+    await recomputeStudentAnalytics(student.id);
+
+    const analytics = await prisma.studentAnalytics.findUniqueOrThrow({ where: { studentId: student.id } });
+    expect(analytics.difficultyKnown).toBe(true);
+    expect(analytics.topicsKnown).toBe(true);
+    expect(analytics.contestsKnown).toBe(true);
+  });
+
   it('excludes students with no retrieved data from the leaderboard', async () => {
     const file = await buildWorkbook();
     const preview = await createUpload({ originalname: 'students.xlsx', path: file, size: 1024 }, null);

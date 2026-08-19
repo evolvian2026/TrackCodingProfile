@@ -386,7 +386,8 @@ export async function getJobProgress(jobId: string): Promise<JobProgress> {
     return {
       platform,
       label: PLATFORMS[platform].label,
-      color: PLATFORMS[platform].color,
+      color: PLATFORMS[platform].colors.light,
+      colorDark: PLATFORMS[platform].colors.dark,
       total: rows.reduce((sum, r) => sum + r._count._all, 0),
       successful: countFor('COMPLETED'),
       failed: countFor('FAILED'),

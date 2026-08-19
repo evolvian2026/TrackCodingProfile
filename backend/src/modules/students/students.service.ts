@@ -113,6 +113,9 @@ export interface StudentListItem {
     cpScore: number;
     platformsActive: number;
     hasData: boolean;
+    difficultyKnown: boolean;
+    topicsKnown: boolean;
+    contestsKnown: boolean;
     computedAt: Date;
   } | null;
   platforms: {
@@ -224,6 +227,9 @@ function toListItem(student: ListRow): StudentListItem {
           cpScore: student.analytics.cpScore,
           platformsActive: student.analytics.platformsActive,
           hasData: student.analytics.hasData,
+          difficultyKnown: student.analytics.difficultyKnown,
+          topicsKnown: student.analytics.topicsKnown,
+          contestsKnown: student.analytics.contestsKnown,
           computedAt: student.analytics.computedAt,
         }
       : null,
@@ -268,7 +274,8 @@ export async function getStudentDetail(id: string) {
     platforms: student.profiles.map((p) => ({
       ...p,
       label: PLATFORMS[p.platform].label,
-      color: PLATFORMS[p.platform].color,
+      color: PLATFORMS[p.platform].colors.light,
+      colorDark: PLATFORMS[p.platform].colors.dark,
       profileUrl: p.profileUrl ?? PLATFORMS[p.platform].profileUrl(p.username),
       capabilities: {
         hasDifficultyBreakdown: PLATFORMS[p.platform].hasDifficultyBreakdown,
@@ -358,7 +365,8 @@ export async function getStudentContests(id: string, platform?: Platform) {
   const byPlatform = ALL_PLATFORMS.map((p) => ({
     platform: p,
     label: PLATFORMS[p].label,
-    color: PLATFORMS[p].color,
+    color: PLATFORMS[p].colors.light,
+    colorDark: PLATFORMS[p].colors.dark,
     count: results.filter((r) => r.platform === p).length,
   })).filter((r) => r.count > 0);
 
@@ -397,7 +405,8 @@ export async function getStudentRatings(id: string, platform?: Platform) {
     return {
       platform: p,
       label: PLATFORMS[p].label,
-      color: PLATFORMS[p].color,
+      color: PLATFORMS[p].colors.light,
+    colorDark: PLATFORMS[p].colors.dark,
       points: points.map((h) => ({ date: h.recordedAt, rating: h.rating, contestName: h.contestName })),
       current: points.at(-1)?.rating ?? null,
       peak: points.length > 0 ? Math.max(...points.map((h) => h.rating)) : null,
@@ -511,7 +520,12 @@ export async function getFilterOptions() {
     batches: batches.map((r) => r.batch!).filter(Boolean),
     branches: branches.map((r) => r.branch!).filter(Boolean),
     sections: sections.map((r) => r.section!).filter(Boolean),
-    platforms: ALL_PLATFORMS.map((p) => ({ key: p, label: PLATFORMS[p].label, color: PLATFORMS[p].color })),
+    platforms: ALL_PLATFORMS.map((p) => ({
+      key: p,
+      label: PLATFORMS[p].label,
+      color: PLATFORMS[p].colors.light,
+      colorDark: PLATFORMS[p].colors.dark,
+    })),
   };
 }
 

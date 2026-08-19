@@ -63,7 +63,11 @@ const cacheSchema = z.object({
   errorTtlMinutes: z.number().int().min(0).max(43_200).optional(),
 });
 
-const colorSchema = z.record(z.enum(ALL_PLATFORMS as [string, ...string[]]), z.string().regex(/^#[0-9A-Fa-f]{6}$/));
+const hex = z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Must be a 6-digit hex colour');
+const colorSchema = z.record(
+  z.enum(ALL_PLATFORMS as [string, ...string[]]),
+  z.object({ light: hex, dark: hex }),
+);
 
 const SCHEMAS: Record<SettingKey, z.ZodTypeAny> = {
   [SETTING_KEYS.scoringWeights]: weightSchema,
@@ -137,7 +141,8 @@ settingsRouter.get('/platforms/meta', (_req, res) => {
     data: ALL_PLATFORMS.map((p) => ({
       key: p,
       label: PLATFORMS[p].label,
-      color: PLATFORMS[p].color,
+      color: PLATFORMS[p].colors.light,
+      colorDark: PLATFORMS[p].colors.dark,
       usernameField: PLATFORMS[p].usernameField,
       capabilities: {
         hasDifficultyBreakdown: PLATFORMS[p].hasDifficultyBreakdown,

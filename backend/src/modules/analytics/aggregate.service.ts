@@ -68,7 +68,8 @@ export async function getOverview(filters: StudentFilters = {}) {
       return {
         platform,
         label: PLATFORMS[platform].label,
-        color: PLATFORMS[platform].color,
+        color: PLATFORMS[platform].colors.light,
+        colorDark: PLATFORMS[platform].colors.dark,
         linked: forPlatform.reduce((sum, p) => sum + p._count._all, 0),
         available: countFor('AVAILABLE'),
         pending: countFor('PENDING'),
@@ -169,6 +170,9 @@ export async function getLeaderboard(
       topicCoverage: row.topicCoverage,
       cpScore: row.cpScore,
       platformsActive: row.platformsActive,
+      difficultyKnown: row.difficultyKnown,
+      topicsKnown: row.topicsKnown,
+      contestsKnown: row.contestsKnown,
       platforms: row.student.profiles.map((p) => ({
         platform: p.platform,
         status: p.status,
@@ -222,7 +226,8 @@ export async function getTopicAnalytics(filters: StudentFilters = {}, platform?:
     heatmap: ALL_PLATFORMS.map((p) => ({
       platform: p,
       label: PLATFORMS[p].label,
-      color: PLATFORMS[p].color,
+      color: PLATFORMS[p].colors.light,
+      colorDark: PLATFORMS[p].colors.dark,
       topics: mergeTopicCounts(
         byPlatform.filter((g) => g.platform === p).map((g) => ({ topic: g.topic, problemsSolved: g._sum.problemsSolved ?? 0 })),
       ),
@@ -267,7 +272,8 @@ export async function getDifficultyAnalytics(filters: StudentFilters = {}) {
       return {
         platform,
         label: PLATFORMS[platform].label,
-        color: PLATFORMS[platform].color,
+        color: PLATFORMS[platform].colors.light,
+        colorDark: PLATFORMS[platform].colors.dark,
         studentsWithData: row?._count._all ?? 0,
         totalSolved: row?._sum.totalSolved ?? null,
         easySolved: PLATFORMS[platform].hasDifficultyBreakdown ? (row?._sum.easySolved ?? null) : null,
@@ -338,7 +344,8 @@ export async function getBatchAnalytics(batch: string, filters: StudentFilters =
       return {
         platform,
         label: PLATFORMS[platform].label,
-        color: PLATFORMS[platform].color,
+        color: PLATFORMS[platform].colors.light,
+        colorDark: PLATFORMS[platform].colors.dark,
         linked: forPlatform.reduce((sum, p) => sum + p._count._all, 0),
         available: forPlatform.find((p) => p.status === 'AVAILABLE')?._count._all ?? 0,
         adoptionRate:

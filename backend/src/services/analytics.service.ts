@@ -1,6 +1,7 @@
 import type { Platform, Prisma } from '@prisma/client';
 import { prisma } from '../db/prisma.js';
 import { logger } from '../lib/logger.js';
+import { PLATFORMS } from '../config/platforms.js';
 import { normalizeTopic } from '../platforms/topics.js';
 import { calculateScore, calculateSkill, type ScoreInputs, type ScoreResult } from './scoring.js';
 import { getScoringTargets, getScoringWeights, getSkillThresholds } from './settings.service.js';
@@ -35,6 +36,13 @@ export async function recomputeStudentAnalytics(studentId: string): Promise<void
 
   const availableProfiles = profiles.filter((p) => p.status === 'AVAILABLE');
   const hasData = availableProfiles.length > 0;
+
+  // Which metrics are even knowable for this student: a platform has to have
+  // returned data AND publish that metric. Consumers use these to render N/A
+  // instead of a zero we never observed.
+  const difficultyKnown = availableProfiles.some((p) => PLATFORMS[p.platform].hasDifficultyBreakdown);
+  const topicsKnown = availableProfiles.some((p) => PLATFORMS[p.platform].hasTopics);
+  const contestsKnown = availableProfiles.some((p) => PLATFORMS[p.platform].hasContests);
 
   const sum = (pick: (p: (typeof profiles)[number]) => number | null) =>
     availableProfiles.reduce((acc, p) => acc + (pick(p) ?? 0), 0);
@@ -109,6 +117,9 @@ export async function recomputeStudentAnalytics(studentId: string): Promise<void
     cpScore: scoreResult.score,
     scoreBreakdown: scoreResult as unknown as Prisma.InputJsonValue,
     hasData,
+    difficultyKnown,
+    topicsKnown,
+    contestsKnown,
     computedAt: new Date(),
   };
 

@@ -54,7 +54,10 @@ export const getSkillThresholds = () =>
   readSetting<SkillThresholds>(SETTING_KEYS.skillThresholds, DEFAULT_SKILL_THRESHOLDS);
 export const getCacheSettings = () => readSetting<CacheSettings>(SETTING_KEYS.cache, DEFAULT_CACHE_SETTINGS);
 export const getPlatformColors = () =>
-  readSetting<Record<Platform, string>>(SETTING_KEYS.platformColors, DEFAULT_PLATFORM_COLORS);
+  readSetting<Record<Platform, { light: string; dark: string }>>(
+    SETTING_KEYS.platformColors,
+    DEFAULT_PLATFORM_COLORS,
+  );
 
 export async function getProcessingLimits(): Promise<ProcessingLimits> {
   const stored = await readSetting<ProcessingLimits>(SETTING_KEYS.processingLimits, DEFAULT_PROCESSING_LIMITS);

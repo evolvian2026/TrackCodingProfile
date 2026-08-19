@@ -1,11 +1,26 @@
 import { Platform } from '@prisma/client';
 
+export interface PlatformColors {
+  light: string;
+  dark: string;
+}
+
 export interface PlatformMeta {
   key: Platform;
   /** Column key used by the Excel importer, e.g. `leetcode_username`. */
   usernameField: string;
   label: string;
-  color: string;
+  /**
+   * Chart colours, one step per theme.
+   *
+   * These are NOT the platforms' marketing hex values. Those fail the
+   * accessibility gates when used as a chart palette: LeetCode's orange and
+   * HackerRank's green are far too light to sit on a white surface, and
+   * CodeChef's brown reads as gray. These are re-stepped hues that keep each
+   * platform recognisable while clearing the colour-blind separation, chroma
+   * and contrast checks in both themes. An administrator can override them.
+   */
+  colors: PlatformColors;
   profileUrl: (username: string) => string;
   /** Whether the platform exposes comparable Easy/Medium/Hard buckets. */
   hasDifficultyBreakdown: boolean;
@@ -21,7 +36,7 @@ export const PLATFORMS: Record<Platform, PlatformMeta> = {
     key: 'LEETCODE',
     usernameField: 'leetcode_username',
     label: 'LeetCode',
-    color: '#F89F1B',
+    colors: { light: '#EB6834', dark: '#D95926' },
     profileUrl: (u) => `https://leetcode.com/u/${encodeURIComponent(u)}/`,
     hasDifficultyBreakdown: true,
     hasContests: true,
@@ -33,7 +48,7 @@ export const PLATFORMS: Record<Platform, PlatformMeta> = {
     key: 'CODECHEF',
     usernameField: 'codechef_username',
     label: 'CodeChef',
-    color: '#5B4638',
+    colors: { light: '#4A3AA7', dark: '#9085E9' },
     profileUrl: (u) => `https://www.codechef.com/users/${encodeURIComponent(u)}`,
     hasDifficultyBreakdown: false,
     hasContests: true,
@@ -45,7 +60,7 @@ export const PLATFORMS: Record<Platform, PlatformMeta> = {
     key: 'HACKERRANK',
     usernameField: 'hackerrank_username',
     label: 'HackerRank',
-    color: '#00EA64',
+    colors: { light: '#1BAF7A', dark: '#199E70' },
     profileUrl: (u) => `https://www.hackerrank.com/profile/${encodeURIComponent(u)}`,
     hasDifficultyBreakdown: false,
     hasContests: false,
@@ -58,7 +73,7 @@ export const PLATFORMS: Record<Platform, PlatformMeta> = {
     key: 'CODEFORCES',
     usernameField: 'codeforces_username',
     label: 'Codeforces',
-    color: '#1F8ACB',
+    colors: { light: '#2A78D6', dark: '#3987E5' },
     profileUrl: (u) => `https://codeforces.com/profile/${encodeURIComponent(u)}`,
     hasDifficultyBreakdown: true,
     hasContests: true,

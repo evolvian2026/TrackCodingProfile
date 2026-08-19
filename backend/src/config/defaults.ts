@@ -112,9 +112,10 @@ export const DEFAULT_CACHE_SETTINGS: CacheSettings = {
   errorTtlMinutes: 30,
 };
 
-export const DEFAULT_PLATFORM_COLORS: Record<Platform, string> = Object.fromEntries(
-  ALL_PLATFORMS.map((p) => [p, PLATFORMS[p].color]),
-) as Record<Platform, string>;
+/** One chart colour per platform per theme; administrator-overridable. */
+export const DEFAULT_PLATFORM_COLORS: Record<Platform, { light: string; dark: string }> = Object.fromEntries(
+  ALL_PLATFORMS.map((p) => [p, { ...PLATFORMS[p].colors }]),
+) as Record<Platform, { light: string; dark: string }>;
 
 export const SETTING_KEYS = {
   scoringWeights: 'scoring.weights',

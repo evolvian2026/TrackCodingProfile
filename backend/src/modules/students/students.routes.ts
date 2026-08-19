@@ -123,7 +123,8 @@ studentsRouter.get(
       data: student.profiles.map((p) => ({
         ...p,
         label: PLATFORMS[p.platform].label,
-        color: PLATFORMS[p.platform].color,
+        color: PLATFORMS[p.platform].colors.light,
+        colorDark: PLATFORMS[p.platform].colors.dark,
         profileUrl: p.profileUrl ?? PLATFORMS[p.platform].profileUrl(p.username),
         capabilities: {
           hasDifficultyBreakdown: PLATFORMS[p.platform].hasDifficultyBreakdown,

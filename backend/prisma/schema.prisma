@@ -535,6 +535,12 @@ model StudentAnalytics {
   scoreBreakdown  Json?
   /// Set when no platform returned usable data — keeps "unknown" out of rankings.
   hasData         Boolean @default(false)
+  /// Whether ANY platform that returned data actually publishes this metric.
+  /// Without these, a student whose only working platform is CodeChef would
+  /// show "0 topics" and "0 easy" — asserting a zero we never observed.
+  difficultyKnown Boolean @default(false)
+  topicsKnown     Boolean @default(false)
+  contestsKnown   Boolean @default(false)
   computedAt      DateTime @default(now())
 
   student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
