@@ -198,6 +198,38 @@ describe('adapter contract', () => {
   });
 });
 
+describe('outbound request safety', () => {
+  beforeEach(() => resetAdapters());
+
+  it('never lets a crafted handle move the request off the platform host', () => {
+    const attacks = [
+      'https://evil.example.com/pwned',
+      'http://169.254.169.254/latest/meta-data/',
+      '../../../etc/passwd',
+      'user/../../admin',
+      'user?x=1',
+      'user#frag',
+      'javascript:alert(1)',
+    ];
+    const expectedHost: Record<string, string> = {
+      LEETCODE: 'leetcode.com',
+      CODECHEF: 'www.codechef.com',
+      HACKERRANK: 'www.hackerrank.com',
+      CODEFORCES: 'codeforces.com',
+    };
+
+    for (const platform of ALL_PLATFORMS) {
+      const adapter = getAdapter(platform, 'live');
+      for (const raw of attacks) {
+        const username = adapter.normalizeUsername(raw);
+        if (!adapter.validateUsername(username).valid) continue;
+        // Anything that survives validation still targets the platform itself.
+        expect(new URL(adapter.buildProfileUrl(username)).host, `${platform} <- ${raw}`).toBe(expectedHost[platform]);
+      }
+    }
+  });
+});
+
 describe('rate limiting and backoff', () => {
   beforeEach(() => resetBuckets());
 

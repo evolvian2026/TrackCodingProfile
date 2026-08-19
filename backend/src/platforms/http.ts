@@ -61,7 +61,7 @@ export async function platformRequest<T = unknown>(
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const res = await fetch(url, {
+      const res = await fetchFollowingSameHost(url, {
         method: options.method ?? 'GET',
         headers: {
           'user-agent': env.USER_AGENT,
@@ -71,7 +71,6 @@ export async function platformRequest<T = unknown>(
         },
         body: options.body ? JSON.stringify(options.body) : undefined,
         signal: controller.signal,
-        redirect: 'follow',
       });
 
       if (res.status === 429 || res.status === 403) {
@@ -128,7 +127,57 @@ export async function platformRequest<T = unknown>(
   throw lastError ?? new PlatformFetchError('ERROR', `${platform} request failed`);
 }
 
+/** Platforms sometimes span a couple of hostnames (apex vs. www, a CDN alias). */
+const ALLOWED_REDIRECT_HOSTS = new Set([
+  'leetcode.com', 'www.leetcode.com',
+  'codechef.com', 'www.codechef.com',
+  'hackerrank.com', 'www.hackerrank.com',
+  'codeforces.com', 'www.codeforces.com', 'm1.codeforces.com', 'm2.codeforces.com', 'm3.codeforces.com',
+]);
+
+const MAX_REDIRECTS = 5;
+
+/**
+ * `fetch` with redirects followed manually, so a redirect can never move the
+ * request onto a host we did not intend to call.
+ *
+ * Blind `redirect: 'follow'` would let a compromised or hijacked platform
+ * response point this server at an internal address (link-local metadata,
+ * an intranet host) — the classic server-side request forgery pivot. Here a
+ * redirect is only followed when its target is one of the known platform
+ * hosts; anything else fails closed.
+ */
+async function fetchFollowingSameHost(url: string, init: RequestInit): Promise<Response> {
+  let current = url;
+
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    const response = await fetch(current, { ...init, redirect: 'manual' });
+
+    const isRedirect = response.status >= 300 && response.status < 400;
+    if (!isRedirect) return response;
+
+    const location = response.headers.get('location');
+    if (!location) return response;
+
+    const target = new URL(location, current);
+
+    if (target.protocol !== 'https:' && target.protocol !== 'http:') {
+      throw new PlatformFetchError('ERROR', `Refusing to follow a redirect to ${target.protocol}`);
+    }
+    if (!ALLOWED_REDIRECT_HOSTS.has(target.hostname.toLowerCase())) {
+      throw new PlatformFetchError('ERROR', `Refusing to follow a redirect off-platform to ${target.hostname}`);
+    }
+
+    // A redirect that carries a body would have to be re-sent; only GET is safe.
+    current = target.toString();
+    init = { ...init, method: 'GET', body: undefined };
+  }
+
+  throw new PlatformFetchError('ERROR', `Too many redirects (more than ${MAX_REDIRECTS})`);
+}
+
 /** Exponential backoff with full jitter, capped. */
+
 export function backoffDelay(attempt: number, baseMs: number, maxMs: number): number {
   const exponential = Math.min(maxMs, baseMs * 2 ** attempt);
   return Math.round(Math.random() * exponential);

@@ -410,6 +410,12 @@ gray. Each hue was re-stepped and machine-validated (lightness band, chroma
 floor, colour-blind separation, contrast) for both themes. Both steps per
 platform are configurable in Settings if you need to match a brand guideline.
 
+**Outbound requests are host-locked.** Handles are normalized to a bare
+username and validated before use, so a crafted value cannot change the target
+host, and redirects are followed manually with an allowlist of platform
+hostnames — a hijacked response cannot pivot the server onto an internal
+address.
+
 **Security.** Argon-grade password hashing via bcrypt, short-lived access tokens
 with rotating refresh tokens in `httpOnly` `SameSite=Strict` cookies,
 role-based access control (`ADMIN` / `TRAINER` / `VIEWER`), per-endpoint rate
