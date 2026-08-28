@@ -3,6 +3,7 @@ import { logger } from './lib/logger.js';
 import { prisma } from './db/prisma.js';
 import { closeQueue, getQueue } from './queue/index.js';
 import { processJobItem, resumeInterruptedJobs } from './services/processing.service.js';
+import { startScheduler, stopScheduler } from './services/scheduler.js';
 import { purgeExpiredCache } from './platforms/cache.js';
 import { cleanupOldUploads } from './modules/upload/upload.service.js';
 import { purgeExpiredRefreshTokens } from './modules/auth/auth.service.js';
@@ -20,6 +21,8 @@ async function main() {
 
   await getQueue().start(processJobItem);
   await resumeInterruptedJobs().catch((err) => logger.warn('Could not resume interrupted jobs', err.message));
+  // The scheduler lives with the worker: it only makes sense where jobs run.
+  startScheduler();
   logger.info(`Worker started (data source: ${env.DATA_SOURCE})`);
 
   const maintenance = setInterval(() => {
@@ -36,6 +39,7 @@ async function main() {
   const shutdown = async (signal: string) => {
     logger.info(`${signal} received, worker shutting down`);
     clearInterval(maintenance);
+    stopScheduler();
     await closeQueue().catch(() => undefined);
     await prisma.$disconnect().catch(() => undefined);
     process.exit(0);

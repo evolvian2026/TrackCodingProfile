@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { ALL_PLATFORMS, PLATFORMS } from '../../config/platforms.js';
 import { SETTING_DEFAULTS, SETTING_KEYS, type SettingKey } from '../../config/defaults.js';
+import { ALERT_TYPES } from '../../services/alerts.service.js';
 import { env } from '../../config/env.js';
 import { asyncHandler } from '../../middleware/error.js';
 import { requireAdmin, requireAuth } from '../../middleware/auth.js';
@@ -11,6 +12,7 @@ import { invalidateCache, purgeExpiredCache } from '../../platforms/cache.js';
 import { bucketStatus } from '../../platforms/rateLimiter.js';
 import { getAllSettings, resetSetting, updateSetting } from '../../services/settings.service.js';
 import { recomputeAllAnalytics } from '../../services/analytics.service.js';
+import { evaluateAllAlerts } from '../../services/alerts.service.js';
 
 const VALID_KEYS = new Set<string>(Object.values(SETTING_KEYS));
 
@@ -69,6 +71,36 @@ const colorSchema = z.record(
   z.object({ light: hex, dark: hex }),
 );
 
+const scheduleSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    frequency: z.enum(['daily', 'weekly']).optional(),
+    dayOfWeek: z.number().int().min(0).max(6).optional(),
+    hour: z.number().int().min(0).max(23).optional(),
+    minute: z.number().int().min(0).max(59).optional(),
+    timezone: z
+      .string()
+      .max(64)
+      .refine(isValidTimeZone, { message: 'Unknown IANA time zone' })
+      .optional(),
+    force: z.boolean().optional(),
+    graceMinutes: z.number().int().min(0).max(10_080).optional(),
+  })
+  .strict();
+
+const alertRulesSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    inactivityDays: z.number().int().min(1).max(365).optional(),
+    minProgressSolved: z.number().int().min(0).max(10_000).optional(),
+    ratingDropThreshold: z.number().int().min(1).max(2_000).optional(),
+    contestInactivityDays: z.number().int().min(1).max(365).optional(),
+    staleDataDays: z.number().int().min(1).max(365).optional(),
+    brokenProfileDays: z.number().int().min(0).max(365).optional(),
+    mutedTypes: z.array(z.enum([...ALERT_TYPES] as [string, ...string[]])).optional(),
+  })
+  .strict();
+
 const SCHEMAS: Record<SettingKey, z.ZodTypeAny> = {
   [SETTING_KEYS.scoringWeights]: weightSchema,
   [SETTING_KEYS.scoringTargets]: targetSchema,
@@ -76,6 +108,8 @@ const SCHEMAS: Record<SettingKey, z.ZodTypeAny> = {
   [SETTING_KEYS.processingLimits]: limitsSchema,
   [SETTING_KEYS.cache]: cacheSchema,
   [SETTING_KEYS.platformColors]: colorSchema,
+  [SETTING_KEYS.refreshSchedule]: scheduleSchema,
+  [SETTING_KEYS.alertRules]: alertRulesSchema,
 };
 
 /** Changing these invalidates every derived score. */
@@ -84,6 +118,19 @@ const SCORE_AFFECTING = new Set<string>([
   SETTING_KEYS.scoringTargets,
   SETTING_KEYS.skillThresholds,
 ]);
+
+/** Changing these changes who appears on the needs-attention list. */
+const ALERT_AFFECTING = new Set<string>([SETTING_KEYS.alertRules]);
+
+/** Rejects a bad zone before it is stored and silently breaks every schedule. */
+function isValidTimeZone(zone: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: zone });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export const settingsRouter = Router();
 settingsRouter.use(requireAuth);
@@ -119,9 +166,13 @@ settingsRouter.patch(
     const value = await updateSetting(key as SettingKey, parsed.data as Record<string, unknown>);
 
     let recomputed: number | undefined;
+    let realerted: number | undefined;
     if (req.body.recompute && SCORE_AFFECTING.has(key)) recomputed = await recomputeAllAnalytics();
+    // Re-run the rules so the needs-attention list matches the thresholds that
+    // are now stored, rather than the ones in force when it was last built.
+    if (req.body.recompute && ALERT_AFFECTING.has(key)) realerted = await evaluateAllAlerts();
 
-    res.json({ data: { key, value }, recomputed });
+    res.json({ data: { key, value }, recomputed, realerted });
   }),
 );
 
@@ -139,8 +190,9 @@ settingsRouter.post(
     // every stored cpScore stays as it was computed under the old weights, and
     // the leaderboard silently disagrees with the settings that produced it.
     const recomputed = req.body.recompute && SCORE_AFFECTING.has(key) ? await recomputeAllAnalytics() : undefined;
+    const realerted = req.body.recompute && ALERT_AFFECTING.has(key) ? await evaluateAllAlerts() : undefined;
 
-    res.json({ data: { key, value }, recomputed });
+    res.json({ data: { key, value }, recomputed, realerted });
   }),
 );
 

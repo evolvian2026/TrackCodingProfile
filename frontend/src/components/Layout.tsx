@@ -4,20 +4,24 @@ import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import {
   BarChart3, Building2, GitCompare, LayoutDashboard, ListChecks, LogOut, Menu, Monitor,
-  Moon, Search, Settings, Sun, Trophy, Upload, Users, Layers, X,
+  Moon, Search, Settings, ShieldAlert, Sun, Trophy, Upload, Users, Layers, X,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useTheme } from '../hooks/useTheme';
-import { studentsApi } from '../api/endpoints';
+import { alertsApi, studentsApi } from '../api/endpoints';
 import { num } from '../lib/format';
 
-const NAV_SECTIONS: { heading: string; items: { to: string; label: string; icon: typeof LayoutDashboard }[] }[] = [
+const NAV_SECTIONS: {
+  heading: string;
+  items: { to: string; label: string; icon: typeof LayoutDashboard; badge?: 'alerts' }[];
+}[] = [
   {
     heading: 'Overview',
     items: [
       { to: '/', label: 'Dashboard', icon: LayoutDashboard },
       { to: '/leaderboard', label: 'Leaderboard', icon: Trophy },
       { to: '/analytics', label: 'Analytics', icon: BarChart3 },
+      { to: '/alerts', label: 'Needs attention', icon: ShieldAlert, badge: 'alerts' },
     ],
   },
   {
@@ -57,6 +61,15 @@ export function Layout() {
 }
 
 function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
+  // Open concerns only — an acknowledged one should not keep nagging.
+  const { data: alertSummary } = useQuery({
+    queryKey: ['alert-summary'],
+    queryFn: () => alertsApi.summary(),
+    staleTime: 60_000,
+    refetchInterval: 120_000,
+  });
+  const openAlerts = alertSummary?.unacknowledged ?? 0;
+
   return (
     <>
       {open && <div className="fixed inset-0 z-30 bg-slate-900/40 lg:hidden" onClick={onClose} aria-hidden />}
@@ -97,7 +110,12 @@ function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
                       }
                     >
                       <item.icon className="h-4 w-4 shrink-0" aria-hidden />
-                      {item.label}
+                      <span className="flex-1">{item.label}</span>
+                      {item.badge === 'alerts' && openAlerts > 0 && (
+                        <span className="tabular rounded-full bg-caution/15 px-1.5 py-0.5 text-2xs font-semibold text-caution">
+                          {openAlerts > 99 ? '99+' : openAlerts}
+                        </span>
+                      )}
                     </NavLink>
                   </li>
                 ))}

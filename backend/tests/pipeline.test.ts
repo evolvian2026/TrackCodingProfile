@@ -28,7 +28,7 @@ const ROWS: (string | number)[][] = [
   [3007, 'Test No Profile', 'none@x.edu', 'Test College', '2024-27', 'ECE', 'A', '', '', '', ''],
 ];
 
-async function buildWorkbook(rows = ROWS): Promise<string> {
+async function buildWorkbook(rows: (string | number)[][] = ROWS): Promise<string> {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('Students');
   sheet.addRow(HEADERS);
@@ -221,6 +221,138 @@ describe('upload -> process -> analytics pipeline', () => {
     expect(analytics.difficultyKnown).toBe(true);
     expect(analytics.topicsKnown).toBe(true);
     expect(analytics.contestsKnown).toBe(true);
+  });
+
+  it('lets exactly one worker claim a scheduled slot', async () => {
+    const { updateSetting } = await import('../src/services/settings.service.js');
+    const { runDueSlot } = await import('../src/services/scheduler.js');
+
+    // A daily slot that has certainly passed today.
+    await updateSetting('processing.schedule', {
+      enabled: true, frequency: 'daily', hour: 0, minute: 1,
+      timezone: 'UTC', force: true, graceMinutes: 10_000,
+    });
+
+    const file = await buildWorkbook(ROWS.slice(0, 2));
+    const preview = await createUpload({ originalname: 's.xlsx', path: file, size: 512 }, null);
+    await commitUpload(preview.uploadId, { mapping: preview.suggestedMapping, startProcessing: false });
+
+    // Four workers racing for the same slot.
+    const results = await Promise.all([runDueSlot(), runDueSlot(), runDueSlot(), runDueSlot()]);
+    expect(results.filter((r) => r.ran)).toHaveLength(1);
+
+    // And the slot is recorded exactly once, so a restart cannot re-fire it.
+    expect(await prisma.scheduledRun.count()).toBe(1);
+    expect((await runDueSlot()).ran).toBe(false);
+
+    await updateSetting('processing.schedule', { enabled: false });
+  });
+
+  it('starts a manual run even when the due slot is already spent', async () => {
+    const { updateSetting } = await import('../src/services/settings.service.js');
+    const { runDueSlot, runNow } = await import('../src/services/scheduler.js');
+
+    await updateSetting('processing.schedule', {
+      enabled: true, frequency: 'daily', hour: 0, minute: 1,
+      timezone: 'UTC', force: true, graceMinutes: 10_000,
+    });
+
+    const file = await buildWorkbook(ROWS.slice(0, 2));
+    const preview = await createUpload({ originalname: 'm.xlsx', path: file, size: 512 }, null);
+    await commitUpload(preview.uploadId, { mapping: preview.suggestedMapping, startProcessing: false });
+
+    expect((await runDueSlot()).ran).toBe(true);
+    // The slot is spent, so the schedule itself refuses...
+    expect((await runDueSlot()).ran).toBe(false);
+    // ...but the button an admin just pressed still has to do something.
+    expect((await runNow()).ran).toBe(true);
+
+    const manual = await prisma.scheduledRun.findFirst({ orderBy: { claimedAt: 'desc' } });
+    // The note is overwritten with the outcome when the job finishes, so how a
+    // run started has to be recorded somewhere the outcome cannot clobber.
+    expect(manual?.trigger).toBe('MANUAL');
+
+    // And it works with automatic refresh switched off entirely.
+    await updateSetting('processing.schedule', { enabled: false });
+    expect((await runNow()).ran).toBe(true);
+  });
+
+  it('records a long-missed slot as skipped instead of firing it late', async () => {
+    const { updateSetting } = await import('../src/services/settings.service.js');
+    const { runDueSlot } = await import('../src/services/scheduler.js');
+
+    await updateSetting('processing.schedule', {
+      enabled: true, frequency: 'weekly', dayOfWeek: (new Date().getUTCDay() + 3) % 7,
+      hour: 0, minute: 1, timezone: 'UTC', force: true, graceMinutes: 1,
+    });
+
+    const result = await runDueSlot();
+    expect(result.ran).toBe(false);
+
+    const run = await prisma.scheduledRun.findFirst({ orderBy: { claimedAt: 'desc' } });
+    expect(run?.status).toBe('SKIPPED');
+    expect(run?.note).toMatch(/grace window/i);
+
+    await updateSetting('processing.schedule', { enabled: false });
+  });
+
+  it('raises a stale-data alert rather than blaming a student we stopped fetching', async () => {
+    const { evaluateStudentAlerts } = await import('../src/services/alerts.service.js');
+
+    const student = await prisma.student.create({ data: { studentId: '9500', name: 'Long Ignored' } });
+    await prisma.platformProfile.create({
+      data: {
+        studentId: student.id, platform: 'CODEFORCES', username: 'ignored_cf',
+        status: 'AVAILABLE', totalSolved: 120,
+        // Fetched successfully, but a long time ago.
+        lastSuccessAt: new Date(Date.now() - 40 * 86_400_000),
+        lastFetchedAt: new Date(Date.now() - 40 * 86_400_000),
+      },
+    });
+    // Two flat readings — which would look like inactivity if we trusted them.
+    for (const days of [60, 40]) {
+      await prisma.dataSnapshot.create({
+        data: { studentId: student.id, platform: null, capturedAt: new Date(Date.now() - days * 86_400_000), totalSolved: 120 },
+      });
+    }
+
+    await evaluateStudentAlerts(student.id);
+    const alerts = await prisma.studentAlert.findMany({ where: { studentId: student.id } });
+
+    expect(alerts.map((a) => a.type)).toEqual(['STALE_DATA']);
+    expect(alerts.map((a) => a.type)).not.toContain('NO_PROGRESS');
+  });
+
+  it('keeps detectedAt stable while a concern persists, and clears it when resolved', async () => {
+    const { evaluateStudentAlerts } = await import('../src/services/alerts.service.js');
+
+    const student = await prisma.student.create({ data: { studentId: '9501', name: 'Stalled Student' } });
+    await prisma.platformProfile.create({
+      data: {
+        studentId: student.id, platform: 'CODEFORCES', username: 'stalled_cf',
+        status: 'AVAILABLE', totalSolved: 200, lastSuccessAt: new Date(),
+      },
+    });
+    for (const [days, solved] of [[30, 200], [1, 200]] as const) {
+      await prisma.dataSnapshot.create({
+        data: { studentId: student.id, platform: null, capturedAt: new Date(Date.now() - days * 86_400_000), totalSolved: solved },
+      });
+    }
+
+    await evaluateStudentAlerts(student.id);
+    const first = await prisma.studentAlert.findFirstOrThrow({ where: { studentId: student.id, type: 'NO_PROGRESS' } });
+
+    // Re-running must not reset "how long has this been true".
+    await evaluateStudentAlerts(student.id);
+    const second = await prisma.studentAlert.findFirstOrThrow({ where: { studentId: student.id, type: 'NO_PROGRESS' } });
+    expect(second.detectedAt.getTime()).toBe(first.detectedAt.getTime());
+
+    // Once they start solving again the concern disappears entirely.
+    await prisma.dataSnapshot.create({
+      data: { studentId: student.id, platform: null, capturedAt: new Date(), totalSolved: 260 },
+    });
+    await evaluateStudentAlerts(student.id);
+    expect(await prisma.studentAlert.count({ where: { studentId: student.id, type: 'NO_PROGRESS' } })).toBe(0);
   });
 
   it('excludes students with no retrieved data from the leaderboard', async () => {

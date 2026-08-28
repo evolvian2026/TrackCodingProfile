@@ -117,6 +117,78 @@ export const DEFAULT_PLATFORM_COLORS: Record<Platform, { light: string; dark: st
   ALL_PLATFORMS.map((p) => [p, { ...PLATFORMS[p].colors }]),
 ) as Record<Platform, { light: string; dark: string }>;
 
+/**
+ * When the application refreshes every profile on its own.
+ *
+ * The historical snapshots that power growth charts and the inactivity rules
+ * only accumulate when a refresh actually runs, so leaving this to someone
+ * remembering to click a button quietly starves both features.
+ */
+export interface RefreshSchedule {
+  enabled: boolean;
+  frequency: 'daily' | 'weekly';
+  /** 0 = Sunday. Only meaningful when frequency is 'weekly'. */
+  dayOfWeek: number;
+  hour: number;
+  minute: number;
+  /** IANA zone, so "2am" means 2am where the institution is. */
+  timezone: string;
+  /** Re-fetch even profiles still inside the cache window. */
+  force: boolean;
+  /**
+   * How late a missed slot may still run. After an outage longer than this the
+   * slot is recorded as skipped rather than firing at an unexpected hour.
+   */
+  graceMinutes: number;
+}
+
+export const DEFAULT_REFRESH_SCHEDULE: RefreshSchedule = {
+  enabled: false,
+  frequency: 'weekly',
+  dayOfWeek: 0,
+  hour: 2,
+  minute: 0,
+  timezone: 'Asia/Kolkata',
+  force: false,
+  graceMinutes: 720,
+};
+
+/**
+ * Thresholds for the "needs attention" list.
+ *
+ * Every rule is measured over observed snapshots. A student is never blamed for
+ * inactivity we cannot actually see — if the data is too stale to judge, the
+ * alert raised is STALE_DATA, which is the administrator's problem.
+ */
+export interface AlertRules {
+  enabled: boolean;
+  /** Window over which progress is judged. */
+  inactivityDays: number;
+  /** Solved-count increase at or below this over the window counts as stalled. */
+  minProgressSolved: number;
+  /** Drop from the window's peak rating that counts as a decline. */
+  ratingDropThreshold: number;
+  /** Days without entering a contest before it is worth flagging. */
+  contestInactivityDays: number;
+  /** A successful fetch older than this makes activity unjudgeable. */
+  staleDataDays: number;
+  /** How long a handle may keep failing before it is probably wrong. */
+  brokenProfileDays: number;
+  /** Rules that are switched off entirely. */
+  mutedTypes: string[];
+}
+
+export const DEFAULT_ALERT_RULES: AlertRules = {
+  enabled: true,
+  inactivityDays: 21,
+  minProgressSolved: 0,
+  ratingDropThreshold: 100,
+  contestInactivityDays: 60,
+  staleDataDays: 14,
+  brokenProfileDays: 7,
+  mutedTypes: [],
+};
+
 export const SETTING_KEYS = {
   scoringWeights: 'scoring.weights',
   scoringTargets: 'scoring.targets',
@@ -124,6 +196,8 @@ export const SETTING_KEYS = {
   processingLimits: 'processing.limits',
   cache: 'cache.settings',
   platformColors: 'ui.platformColors',
+  refreshSchedule: 'processing.schedule',
+  alertRules: 'alerts.rules',
 } as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS];
@@ -135,4 +209,6 @@ export const SETTING_DEFAULTS: Record<SettingKey, unknown> = {
   [SETTING_KEYS.processingLimits]: DEFAULT_PROCESSING_LIMITS,
   [SETTING_KEYS.cache]: DEFAULT_CACHE_SETTINGS,
   [SETTING_KEYS.platformColors]: DEFAULT_PLATFORM_COLORS,
+  [SETTING_KEYS.refreshSchedule]: DEFAULT_REFRESH_SCHEDULE,
+  [SETTING_KEYS.alertRules]: DEFAULT_ALERT_RULES,
 };

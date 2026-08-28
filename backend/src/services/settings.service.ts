@@ -2,16 +2,20 @@ import type { Platform } from '@prisma/client';
 import { prisma } from '../db/prisma.js';
 import { logger } from '../lib/logger.js';
 import {
+  DEFAULT_ALERT_RULES,
   DEFAULT_CACHE_SETTINGS,
   DEFAULT_PLATFORM_COLORS,
   DEFAULT_PROCESSING_LIMITS,
+  DEFAULT_REFRESH_SCHEDULE,
   DEFAULT_SCORING_TARGETS,
   DEFAULT_SCORING_WEIGHTS,
   DEFAULT_SKILL_THRESHOLDS,
   SETTING_DEFAULTS,
   SETTING_KEYS,
+  type AlertRules,
   type CacheSettings,
   type ProcessingLimits,
+  type RefreshSchedule,
   type ScoringTargets,
   type ScoringWeights,
   type SettingKey,
@@ -59,6 +63,10 @@ export const getPlatformColors = () =>
     DEFAULT_PLATFORM_COLORS,
   );
 
+export const getRefreshSchedule = () =>
+  readSetting<RefreshSchedule>(SETTING_KEYS.refreshSchedule, DEFAULT_REFRESH_SCHEDULE);
+export const getAlertRules = () => readSetting<AlertRules>(SETTING_KEYS.alertRules, DEFAULT_ALERT_RULES);
+
 export async function getProcessingLimits(): Promise<ProcessingLimits> {
   const stored = await readSetting<ProcessingLimits>(SETTING_KEYS.processingLimits, DEFAULT_PROCESSING_LIMITS);
   return {
@@ -71,13 +79,15 @@ export async function getProcessingLimits(): Promise<ProcessingLimits> {
 }
 
 export async function getAllSettings() {
-  const [weights, targets, skills, limits, cache, colors] = await Promise.all([
+  const [weights, targets, skills, limits, cache, colors, schedule, alerts] = await Promise.all([
     getScoringWeights(),
     getScoringTargets(),
     getSkillThresholds(),
     getProcessingLimits(),
     getCacheSettings(),
     getPlatformColors(),
+    getRefreshSchedule(),
+    getAlertRules(),
   ]);
   return {
     [SETTING_KEYS.scoringWeights]: weights,
@@ -86,6 +96,8 @@ export async function getAllSettings() {
     [SETTING_KEYS.processingLimits]: limits,
     [SETTING_KEYS.cache]: cache,
     [SETTING_KEYS.platformColors]: colors,
+    [SETTING_KEYS.refreshSchedule]: schedule,
+    [SETTING_KEYS.alertRules]: alerts,
   };
 }
 

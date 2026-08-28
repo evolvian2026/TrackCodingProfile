@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Download, ExternalLink, Pencil, RefreshCw } from 'lucide-react';
-import { studentsApi } from '../api/endpoints';
+import { alertsApi, studentsApi } from '../api/endpoints';
 import { downloadFile, errorMessage } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
 import { useTheme } from '../hooks/useTheme';
@@ -28,6 +28,11 @@ export default function StudentDetailPage() {
   const [editing, setEditing] = useState(false);
 
   const student = useQuery({ queryKey: ['student', id], queryFn: () => studentsApi.detail(id) });
+  // Why this student is on the needs-attention list, if they are.
+  const alerts = useQuery({
+    queryKey: ['student-alerts', id],
+    queryFn: () => alertsApi.list({ search: id, pageSize: 20, includeAcknowledged: true }),
+  });
 
   const refresh = useMutation({
     mutationFn: () => studentsApi.refreshOne(id, { force: true }),
@@ -104,6 +109,22 @@ export default function StudentDetailPage() {
           </>
         }
       />
+
+      {(alerts.data?.data.filter((a) => a.student.id === data.id).length ?? 0) > 0 && (
+        <div className="mb-5 space-y-2">
+          {alerts.data!.data
+            .filter((a) => a.student.id === data.id)
+            .map((alert) => (
+              <Callout
+                key={alert.id}
+                tone={alert.severity === 'INFO' ? 'info' : 'warning'}
+                title={alert.label}
+              >
+                {alert.message}
+              </Callout>
+            ))}
+        </div>
+      )}
 
       {!hasData && (
         <div className="mb-5">

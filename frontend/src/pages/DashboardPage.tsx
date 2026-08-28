@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Activity, AlertTriangle, Database, Trophy, Users } from 'lucide-react';
-import { analyticsApi, leaderboardApi } from '../api/endpoints';
+import { AlertTriangle, Database, ShieldAlert, Trophy, Users } from 'lucide-react';
+import { alertsApi, analyticsApi, leaderboardApi } from '../api/endpoints';
 import { useFilters } from '../hooks/useFilters';
 import { useTheme } from '../hooks/useTheme';
 import { FilterBar } from '../components/FilterBar';
@@ -20,6 +20,7 @@ export default function DashboardPage() {
   const topics = useQuery({ queryKey: ['topics', params], queryFn: () => analyticsApi.topics(params) });
   const growth = useQuery({ queryKey: ['growth', params], queryFn: () => analyticsApi.growth({ ...params, days: 90 }) });
   const top = useQuery({ queryKey: ['leaderboard-top', params], queryFn: () => leaderboardApi.get({ ...params, pageSize: 5 }) });
+  const alerts = useQuery({ queryKey: ['alert-summary', params], queryFn: () => alertsApi.summary(params) });
 
   if (overview.isError) {
     return <ErrorState message={errorMessage(overview.error)} onRetry={() => overview.refetch()} />;
@@ -57,12 +58,29 @@ export default function DashboardPage() {
           icon={<Database className="h-4 w-4" />}
         />
         <StatCard
-          label="Active jobs"
-          value={overview.isLoading ? '—' : num(data?.activeJobs)}
-          hint={data && data.activeJobs > 0 ? 'Processing in progress' : 'Nothing running'}
-          icon={<Activity className="h-4 w-4" />}
+          label="Needs attention"
+          value={alerts.isLoading ? '—' : num(alerts.data?.unacknowledged)}
+          hint={
+            alerts.data && alerts.data.unacknowledged > 0
+              ? alerts.data.byType.slice(0, 2).map((t) => t.label).join(', ')
+              : 'Nobody is flagged'
+          }
+          accent={alerts.data && alerts.data.unacknowledged > 0 ? 'rgb(var(--caution))' : undefined}
+          icon={<ShieldAlert className="h-4 w-4" />}
         />
       </div>
+
+      {alerts.data && alerts.data.unacknowledged > 0 && (
+        <div className="mb-5">
+          <Callout tone="warning" title={`${num(alerts.data.unacknowledged)} students need attention`}>
+            {alerts.data.byType.slice(0, 3).map((t) => `${t.count} ${t.label.toLowerCase()}`).join(' · ')}.{' '}
+            <Link to="/alerts" className="font-medium text-brand underline-offset-2 hover:underline">
+              Review the list
+            </Link>
+            .
+          </Callout>
+        </div>
+      )}
 
       {data && data.studentsWithoutData > 0 && (
         <div className="mb-5">
@@ -81,7 +99,11 @@ export default function DashboardPage() {
         <Card className="xl:col-span-2">
           <CardHeader
             title="Platform coverage"
-            subtitle="How many linked profiles actually returned public data"
+            subtitle={
+              data && data.activeJobs > 0
+                ? `How many linked profiles returned public data · ${num(data.activeJobs)} job${data.activeJobs === 1 ? '' : 's'} running`
+                : 'How many linked profiles actually returned public data'
+            }
             actions={<Link to="/platforms" className="text-xs font-medium text-brand hover:underline">Details</Link>}
           />
           {overview.isLoading ? (

@@ -498,6 +498,8 @@ export interface AppSettings {
   'processing.limits': Record<string, number | Record<string, number>>;
   'cache.settings': Record<string, number>;
   'ui.platformColors': Record<Platform, { light: string; dark: string }>;
+  'processing.schedule': RefreshSchedule;
+  'alerts.rules': AlertRules;
 }
 
 export interface SettingsResponse {
@@ -520,4 +522,88 @@ export interface PlatformMeta {
   capabilities: { hasDifficultyBreakdown: boolean; hasContests: boolean; hasTopics: boolean };
   defaultRateLimitPerMinute: number;
   dataSourceNote: string;
+}
+
+// -- alerts and automation ---------------------------------------------------
+
+export type AlertType =
+  | 'NO_PROGRESS'
+  | 'RATING_DECLINE'
+  | 'CONTEST_INACTIVE'
+  | 'NO_DATA'
+  | 'PROFILE_UNAVAILABLE'
+  | 'NO_PLATFORM_HANDLES'
+  | 'STALE_DATA';
+
+export type AlertSeverity = 'INFO' | 'WARNING' | 'CRITICAL';
+
+export interface StudentAlert {
+  id: string;
+  type: AlertType;
+  label: string;
+  severity: AlertSeverity;
+  message: string;
+  /** The observations the rule fired on, so the claim can be checked. */
+  evidence: Record<string, unknown> | null;
+  detectedAt: string;
+  acknowledgedAt: string | null;
+  acknowledgedBy: string | null;
+  student: {
+    id: string;
+    studentId: string;
+    name: string;
+    email: string | null;
+    college: string | null;
+    batch: string | null;
+    branch: string | null;
+    section: string | null;
+    analytics: { totalSolved: number; currentRating: number | null; cpScore: number; hasData: boolean } | null;
+  };
+}
+
+export interface AlertSummary {
+  total: number;
+  unacknowledged: number;
+  byType: { type: AlertType; label: string; severity: AlertSeverity; count: number }[];
+  bySeverity: Record<AlertSeverity, number>;
+}
+
+export interface RefreshSchedule {
+  enabled: boolean;
+  frequency: 'daily' | 'weekly';
+  dayOfWeek: number;
+  hour: number;
+  minute: number;
+  timezone: string;
+  force: boolean;
+  graceMinutes: number;
+}
+
+export interface AlertRules {
+  enabled: boolean;
+  inactivityDays: number;
+  minProgressSolved: number;
+  ratingDropThreshold: number;
+  contestInactivityDays: number;
+  staleDataDays: number;
+  brokenProfileDays: number;
+  mutedTypes: AlertType[];
+}
+
+export interface ScheduleStatus {
+  schedule: RefreshSchedule;
+  description: string;
+  nextRunAt: string | null;
+  previousRunAt: string | null;
+  recentRuns: {
+    id: string;
+    scheduledFor: string;
+    status: 'CLAIMED' | 'STARTED' | 'COMPLETED' | 'FAILED' | 'SKIPPED';
+    trigger: 'SCHEDULED' | 'MANUAL';
+    note: string | null;
+    jobId: string | null;
+    jobNumber: number | null;
+    claimedAt: string;
+    finishedAt: string | null;
+  }[];
 }

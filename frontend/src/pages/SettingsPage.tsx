@@ -5,10 +5,11 @@ import { analyticsApi, settingsApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
 import { Callout, Card, LoadingBlock, PageHeader, Spinner, Tabs, useToast } from '../components/ui';
+import { AutomationSettings } from '../components/AutomationSettings';
 import { num } from '../lib/format';
 import type { Platform } from '../types/api';
 
-type TabId = 'scoring' | 'skills' | 'processing' | 'appearance';
+type TabId = 'scoring' | 'skills' | 'processing' | 'automation' | 'appearance';
 
 export default function SettingsPage() {
   const { can } = useAuth();
@@ -45,6 +46,7 @@ export default function SettingsPage() {
             { id: 'scoring', label: 'Scoring' },
             { id: 'skills', label: 'Skill levels' },
             { id: 'processing', label: 'Processing' },
+            { id: 'automation', label: 'Automation' },
             { id: 'appearance', label: 'Appearance' },
           ]}
         />
@@ -52,6 +54,7 @@ export default function SettingsPage() {
           {tab === 'scoring' && <ScoringSettings settings={settings.data!} editable={can('ADMIN')} />}
           {tab === 'skills' && <SkillSettings settings={settings.data!} editable={can('ADMIN')} />}
           {tab === 'processing' && <ProcessingSettings settings={settings.data!} editable={can('ADMIN')} />}
+          {tab === 'automation' && <AutomationSettings settings={settings.data!} editable={can('ADMIN')} />}
           {tab === 'appearance' && <AppearanceSettings settings={settings.data!} editable={can('ADMIN')} />}
         </div>
       </Card>

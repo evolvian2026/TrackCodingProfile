@@ -87,6 +87,7 @@ try {
   check('growth charts render an SVG',
     (await page.locator('section', { hasText: 'Cohort growth' }).locator('svg').count()) >= 2);
   check('recent jobs table is present', await page.getByText('Recent processing jobs').isVisible());
+  check('the dashboard surfaces who needs attention', await page.getByText('Needs attention').first().isVisible());
 
   // ------------------------------------------------------------------ upload
   section('Excel upload wizard');
@@ -427,6 +428,113 @@ try {
   check('appearance warns that defaults are accessibility-checked',
     await page.getByText(/accessibility-checked, not brand-exact/i).isVisible());
 
+  // ----------------------------------------------------------------- alerts
+  section('Needs attention');
+  await page.goto(`${BASE}/alerts`, { waitUntil: 'networkidle' });
+  await settle(1600);
+  check('the alerts screen renders', await page.getByRole('heading', { name: 'Needs attention' }).isVisible());
+  check('coaching and data problems are counted separately',
+    (await page.getByText('Needs coaching').isVisible()) && (await page.getByText('Needs data fixing').isVisible()));
+
+  const rows = page.locator('main li').filter({ has: page.locator('span.badge') });
+  const alertRowCount = await rows.count();
+  check('the seeded failure scenarios are listed', alertRowCount > 0, alertRowCount);
+  await tryCheck('every concern names a student and states its case', async () => {
+    const first = await rows.first().innerText();
+    return /\w/.test(first) && first.includes('Detected');
+  });
+  await tryCheck('a concern shows the observations behind it', async () => {
+    const text = await page.locator('main').innerText();
+    // Activity rules cite dated readings; handle problems cite the platform.
+    return /Based on /.test(text) || /handle is probably wrong/.test(text);
+  });
+
+  // Filtering by concern must actually narrow the list.
+  const concern = page.locator('main select').filter({ hasText: 'All concerns' }).first();
+  const concernOptions = await concern.locator('option').allInnerTexts();
+  check('the concern filter is populated from the real counts', concernOptions.length > 1, concernOptions);
+  if (concernOptions.length > 1) {
+    await concern.selectOption({ index: 1 });
+    await settle(1400);
+    const narrowed = await rows.count();
+    check('filtering by concern narrows the list', narrowed > 0 && narrowed <= alertRowCount, { alertRowCount, narrowed });
+    await concern.selectOption({ index: 0 });
+    await settle(1300);
+  }
+
+  // Acknowledge, confirm it leaves the default view, then put it back.
+  const ackButton = page.getByRole('button', { name: 'Acknowledge' }).first();
+  if (await ackButton.count()) {
+    const before = await rows.count();
+    await ackButton.click();
+    await settle(1600);
+    check('acknowledging a concern removes it from the open list', (await rows.count()) === before - 1,
+      { before, after: await rows.count() });
+
+    await page.getByText('Show acknowledged').click();
+    await settle(1500);
+    check('acknowledged concerns can be shown again', (await rows.count()) >= before, await rows.count());
+    await page.getByRole('button', { name: 'Reopen' }).first().click();
+    await settle(1500);
+    check('an acknowledged concern can be reopened',
+      (await page.getByRole('button', { name: 'Reopen' }).count()) === 0);
+    await page.getByText('Show acknowledged').click();
+    await settle(1200);
+  }
+
+  await page.getByRole('button', { name: /Re-evaluate/ }).click();
+  await settle(3000);
+  check('the rules can be re-run from the screen', (await rows.count()) > 0);
+  check('the sidebar badges the open count',
+    (await page.locator('a[href="/alerts"]').first().innerText()).match(/\d/) !== null,
+    await page.locator('a[href="/alerts"]').first().innerText());
+
+  // -------------------------------------------------------------- automation
+  section('Automation settings');
+  await page.goto(`${BASE}/settings`, { waitUntil: 'networkidle' });
+  await settle(1500);
+  await page.getByRole('tab', { name: 'Automation' }).click();
+  await settle(1500);
+  check('the automation tab renders the schedule',
+    await page.getByRole('heading', { name: 'Automatic refresh' }).first().isVisible());
+  check('the automation tab renders the needs-attention rules',
+    await page.getByRole('heading', { name: 'Needs-attention rules' }).first().isVisible());
+
+  const enable = page.locator('main input[type=checkbox]').first();
+  if (!(await enable.isChecked())) { await enable.click(); await settle(600); }
+  const frequency = page.locator('main select').first();
+  await frequency.selectOption('daily');
+  await settle(600);
+  await page.getByRole('button', { name: /Save schedule/ }).click();
+  await settle(2500);
+  check('saving the schedule reports the next run in words',
+    /Every day at/i.test(await page.locator('main').innerText()), null);
+  await tryCheck('the next run is shown as a real date', async () =>
+    /Next run/i.test(await page.locator('main').innerText()));
+
+  await page.getByRole('button', { name: /Refresh everyone now/ }).click();
+  await settle(4000);
+  await page.reload({ waitUntil: 'networkidle' });
+  await settle(1500);
+  await page.getByRole('tab', { name: 'Automation' }).click();
+  await settle(1800);
+  check('a manual run is recorded as manual, not as a schedule firing',
+    /Manual/.test(await page.locator('main table').innerText()), await page.locator('main table').innerText());
+
+  check('the alert thresholds are editable', (await page.getByText(/Judge activity over/i).count()) > 0);
+  await page.reload({ waitUntil: 'networkidle' });
+  await settle(1400);
+  await page.getByRole('tab', { name: 'Automation' }).click();
+  await settle(1600);
+  check('the saved schedule persists across a reload',
+    /Every day at/i.test(await page.locator('main').innerText()), null);
+
+  // Leave the app as we found it.
+  const disable = page.locator('main input[type=checkbox]').first();
+  if (await disable.isChecked()) { await disable.click(); await settle(600); }
+  await page.getByRole('button', { name: /Save schedule/ }).click();
+  await settle(2000);
+
   // ------------------------------------------------------------------- theme
   section('Theme and navigation');
   await page.goto(`${BASE}/`, { waitUntil: 'networkidle' });
@@ -453,10 +561,12 @@ try {
   for (const [label, path] of [
     ['Dashboard', '/'], ['Leaderboard', '/leaderboard'], ['Analytics', '/analytics'],
     ['Students', '/students'], ['Compare', '/compare'], ['Batches', '/batches'],
-    ['Colleges', '/colleges'], ['Upload Excel', '/upload'], ['Processing', '/jobs'],
+    ['Colleges', '/colleges'], ['Needs attention', '/alerts'], ['Upload Excel', '/upload'], ['Processing', '/jobs'],
     ['Platforms', '/platforms'], ['Settings', '/settings'],
   ]) {
-    await page.getByRole('link', { name: label, exact: true }).first().click();
+    // The needs-attention link carries a live count, so its accessible name
+    // is not just the label.
+    await page.getByRole('link', { name: label, exact: label !== 'Needs attention' }).first().click();
     await settle(1100);
     await tryCheck(`sidebar link "${label}" navigates to ${path}`, async () => new URL(page.url()).pathname === path);
   }

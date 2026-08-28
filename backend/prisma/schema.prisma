@@ -81,6 +81,47 @@ enum SkillLevel {
   EXPERT
 }
 
+/// Why a student is on the "needs attention" list.
+enum AlertType {
+  /// Solved count has not moved across the whole observation window.
+  NO_PROGRESS
+  /// Current rating is well below its recent peak.
+  RATING_DECLINE
+  /// Has not entered a contest across the observation window.
+  CONTEST_INACTIVE
+  /// Handles exist but no platform has ever returned data.
+  NO_DATA
+  /// A linked handle looks wrong — not found, private or erroring.
+  PROFILE_UNAVAILABLE
+  /// No handles on file, so nothing will ever be fetched.
+  NO_PLATFORM_HANDLES
+  /// We have not refreshed recently enough to judge activity at all.
+  /// This is an administrator problem, never the student's.
+  STALE_DATA
+}
+
+enum AlertSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+enum ScheduledRunStatus {
+  CLAIMED
+  STARTED
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
+/// How a refresh run was started. Kept apart from the note, because the note is
+/// overwritten with the outcome once the job finishes and "somebody pressed the
+/// button" has to survive that.
+enum RunTrigger {
+  SCHEDULED
+  MANUAL
+}
+
 // ---------------------------------------------------------------------------
 // Auth
 // ---------------------------------------------------------------------------
@@ -96,9 +137,10 @@ model User {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  uploads         UploadBatch[]
-  processingJobs  ProcessingJob[]
-  refreshTokens   RefreshToken[]
+  uploads            UploadBatch[]
+  processingJobs     ProcessingJob[]
+  refreshTokens      RefreshToken[]
+  acknowledgedAlerts StudentAlert[]
 
   @@map("users")
 }
@@ -148,6 +190,7 @@ model Student {
   errors          PlatformError[]
   analytics       StudentAnalytics?
   skills          StudentSkill[]
+  alerts          StudentAlert[]
 
   @@index([college])
   @@index([batch])
@@ -566,6 +609,63 @@ model StudentSkill {
   @@unique([studentId, topic])
   @@index([studentId])
   @@map("student_skills")
+}
+
+// ---------------------------------------------------------------------------
+// Alerts — the "needs attention" list
+// ---------------------------------------------------------------------------
+
+/// One active concern about one student.
+///
+/// Rows are keyed on (student, type) so `detectedAt` answers "how long has this
+/// been true", and a concern that stops applying is deleted rather than left to
+/// rot. `evidence` always carries the numbers the rule fired on, so a coach can
+/// see why without trusting the label.
+model StudentAlert {
+  id         String        @id @default(cuid())
+  studentId  String
+  type       AlertType
+  severity   AlertSeverity
+  message    String
+  /// The observations behind the alert (values, dates, window length).
+  evidence   Json?
+  detectedAt DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+  /// Set when someone has seen it and does not need it in the default view.
+  acknowledgedAt   DateTime?
+  acknowledgedById String?
+
+  student       Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  acknowledgedBy User?  @relation(fields: [acknowledgedById], references: [id], onDelete: SetNull)
+
+  @@unique([studentId, type])
+  @@index([type, severity])
+  @@index([acknowledgedAt])
+  @@map("student_alerts")
+}
+
+// ---------------------------------------------------------------------------
+// Scheduled refreshes
+// ---------------------------------------------------------------------------
+
+/// One occurrence of the refresh schedule.
+///
+/// `scheduledFor` is unique, which is the whole point: several workers may be
+/// running, and inserting the row is how one of them claims the slot. Losing
+/// that insert means another worker got there first, so nothing double-fires.
+model ScheduledRun {
+  id           String             @id @default(cuid())
+  scheduledFor DateTime           @unique
+  status       ScheduledRunStatus @default(CLAIMED)
+  trigger      RunTrigger         @default(SCHEDULED)
+  jobId        String?
+  /// Why a slot was skipped, or why the run failed.
+  note         String?
+  claimedAt    DateTime           @default(now())
+  finishedAt   DateTime?
+
+  @@index([scheduledFor])
+  @@map("scheduled_runs")
 }
 
 // ---------------------------------------------------------------------------

@@ -507,6 +507,181 @@ async function main() {
     check('a platform-scoped refresh only queues that platform', platformOnly.status === 202 && platformOnly.body.totalItems > 0, platformOnly.body);
   }
 
+  // ------------------------------------------------------ scheduled refresh
+  section('Scheduled refresh');
+  {
+    const off = await call('PATCH', '/api/settings/processing.schedule', {
+      body: { value: { enabled: false, frequency: 'weekly', dayOfWeek: 0, hour: 2, minute: 0, timezone: 'Asia/Kolkata', force: false, graceMinutes: 720 } },
+    });
+    check('the schedule can be switched off', off.status === 200 && off.body.data.value.enabled === false, off.body);
+
+    const idle = await call('GET', '/api/schedule');
+    check('a disabled schedule reports no next run',
+      idle.status === 200 && idle.body.data.nextRunAt === null && /off/i.test(idle.body.data.description), idle.body?.data);
+
+    const badZone = await call('PATCH', '/api/settings/processing.schedule', {
+      body: { value: { enabled: true, frequency: 'daily', dayOfWeek: 0, hour: 2, minute: 0, timezone: 'Mars/Olympus', force: false, graceMinutes: 720 } },
+    });
+    check('an unknown time zone is rejected with 400', badZone.status === 400, badZone.body?.error?.message);
+
+    const badHour = await call('PATCH', '/api/settings/processing.schedule', {
+      body: { value: { enabled: true, frequency: 'daily', dayOfWeek: 0, hour: 25, minute: 0, timezone: 'UTC', force: false, graceMinutes: 720 } },
+    });
+    check('an out-of-range hour is rejected with 400', badHour.status === 400, badHour.body?.error?.message);
+
+    const on = await call('PATCH', '/api/settings/processing.schedule', {
+      body: { value: { enabled: true, frequency: 'daily', dayOfWeek: 0, hour: 2, minute: 30, timezone: 'Asia/Kolkata', force: true, graceMinutes: 720 } },
+    });
+    check('a daily schedule saves', on.status === 200 && on.body.data.value.hour === 2, on.body);
+
+    const status = await call('GET', '/api/schedule');
+    const next = status.body?.data?.nextRunAt ? new Date(status.body.data.nextRunAt) : null;
+    check('the schedule is described in words', /every day at 02:30/i.test(status.body?.data?.description ?? ''), status.body?.data?.description);
+    check('the next run is in the future', Boolean(next) && next!.getTime() > Date.now(), status.body?.data?.nextRunAt);
+    check('the next run lands on the requested wall-clock minute in that zone',
+      Boolean(next) && new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false })
+        .format(next!) === '02:30',
+      next?.toISOString());
+    check('the previous run is in the past',
+      Boolean(status.body?.data?.previousRunAt) && new Date(status.body.data.previousRunAt).getTime() < Date.now());
+
+    const viewerRun = await call('POST', '/api/schedule/run-now', { token: viewerToken, body: {} });
+    check('a viewer cannot start a refresh run (403)', viewerRun.status === 403, viewerRun.status);
+
+    const ran = await call('POST', '/api/schedule/run-now', { body: {} });
+    check('run-now starts a refresh', ran.status === 202 && ran.body.data.ran === true, ran.body);
+
+    const again = await call('POST', '/api/schedule/run-now', { body: {} });
+    check('run-now works twice — it is not limited to the schedule slot',
+      again.status === 202 && again.body.data.ran === true, again.body);
+
+    await sleep(1500);
+    const history = await call('GET', '/api/schedule');
+    const runs = history.body?.data?.recentRuns ?? [];
+    check('every run is recorded in the history', runs.length >= 2, runs.length);
+    check('a manual run is recorded as manual', runs.some((r: any) => r.trigger === 'MANUAL'), runs.map((r: any) => r.trigger));
+    check('how a run started survives the job finishing',
+      runs.filter((r: any) => r.trigger === 'MANUAL').every((r: any) => r.status !== 'CLAIMED'), runs[0]);
+    check('a started run carries its job number', runs.some((r: any) => typeof r.jobNumber === 'number'), runs[0]);
+
+    // force stays on so this last run has work to do rather than finding
+    // everything still inside the cache window.
+    await call('PATCH', '/api/settings/processing.schedule', { body: { value: { enabled: false, force: true } } });
+    const offRun = await call('POST', '/api/schedule/run-now', { body: {} });
+    check('run-now still works with automatic refresh switched off',
+      offRun.status === 202 && offRun.body.data.ran === true, offRun.body);
+
+    const restored = await call('POST', '/api/settings/processing.schedule/reset', { body: { recompute: false } });
+    check('the schedule can be reset to its defaults', restored.status === 200 && restored.body.data.value.enabled === false, restored.body);
+  }
+
+  // ---------------------------------------------------------------- alerts
+  section('Alerts');
+  {
+    const recompute = await call('POST', '/api/alerts/recompute', {});
+    check('the rules can be re-run for every student', recompute.status === 200 && recompute.body.evaluated > 0, recompute.body);
+
+    const types = await call('GET', '/api/alerts/types');
+    const typeNames: string[] = (types.body?.data ?? []).map((t: any) => t.type);
+    check('the alert catalogue lists all seven types', typeNames.length === 7, typeNames);
+    check('every type has a human label', (types.body?.data ?? []).every((t: any) => Boolean(t.label)), types.body?.data);
+
+    const list = await call('GET', '/api/alerts?pageSize=200');
+    const alerts: any[] = list.body?.data ?? [];
+    check('the alert list loads', list.status === 200 && Array.isArray(alerts), list.status);
+    check('the seeded failure scenarios raise alerts', alerts.length > 0, alerts.length);
+    check('unacknowledged alerts are the default view', alerts.every((a) => a.acknowledgedAt === null));
+    check('alerts are ordered most severe first', alerts.every((a, i) =>
+      i === 0 || ['INFO', 'WARNING', 'CRITICAL'].indexOf(alerts[i - 1].severity) >= ['INFO', 'WARNING', 'CRITICAL'].indexOf(a.severity)));
+    check('every alert names the student it is about', alerts.every((a) => Boolean(a.student?.name && a.student?.id)));
+    check('every alert states its case in a sentence', alerts.every((a) => typeof a.message === 'string' && a.message.length > 10));
+
+    const broken = alerts.find((a) => a.type === 'PROFILE_UNAVAILABLE');
+    check('a failing handle is reported as an operator problem, not a student one',
+      Boolean(broken) && /handle/i.test(broken.message), broken?.message);
+
+    const handleless = alerts.find((a) => a.type === 'NO_PLATFORM_HANDLES');
+    check('a student with no handles on file is flagged', Boolean(handleless), typeNames);
+
+    const evidenced = alerts.filter((a) => a.evidence);
+    check('activity alerts carry the observations they compared',
+      evidenced.length === 0 || evidenced.every((a) => typeof a.evidence === 'object'), evidenced[0]?.evidence);
+
+    // A student is never blamed for a gap in our own collection.
+    const stale = alerts.filter((a) => a.type === 'STALE_DATA').map((a) => a.student.id);
+    const blamedAnyway = alerts.filter((a) => ['NO_PROGRESS', 'RATING_DECLINE'].includes(a.type) && stale.includes(a.student.id));
+    check('a student we stopped fetching is never also accused of not progressing',
+      blamedAnyway.length === 0, blamedAnyway.map((a) => a.type));
+
+    const summary = await call('GET', '/api/alerts/summary');
+    const bySeverity = summary.body?.data?.bySeverity ?? {};
+    check('the summary counts match the list',
+      summary.body?.data?.unacknowledged === alerts.length, { summary: summary.body?.data?.unacknowledged, listed: alerts.length });
+    check('the summary splits by severity',
+      (bySeverity.INFO ?? 0) + (bySeverity.WARNING ?? 0) + (bySeverity.CRITICAL ?? 0) === alerts.length, bySeverity);
+    check('the summary breaks down by type',
+      Array.isArray(summary.body?.data?.byType) && summary.body.data.byType.every((t: any) => t.label && t.count > 0), summary.body?.data?.byType);
+
+    const filtered = await call(`GET`, `/api/alerts?type=${alerts[0].type}`);
+    check('alerts can be filtered by type',
+      (filtered.body?.data ?? []).every((a: any) => a.type === alerts[0].type), filtered.body?.data?.[0]?.type);
+
+    const byCollege = await call('GET', '/api/alerts?college=ABC%20Institute%20of%20Technology');
+    check('alerts accept the student filters',
+      byCollege.status === 200 && (byCollege.body?.data ?? []).every((a: any) => a.student.college === 'ABC Institute of Technology'),
+      byCollege.status);
+
+    const badType = await call('GET', '/api/alerts?type=NOT_A_REAL_ALERT');
+    check('an unknown alert type is rejected with 400', badType.status === 400, badType.status);
+
+    const viewerAck = await call('POST', `/api/alerts/${alerts[0].id}/acknowledge`, { token: viewerToken, body: { acknowledged: true } });
+    check('a viewer cannot acknowledge an alert (403)', viewerAck.status === 403, viewerAck.status);
+
+    const ack = await call('POST', `/api/alerts/${alerts[0].id}/acknowledge`, { token: trainerToken, body: { acknowledged: true } });
+    check('a trainer can acknowledge an alert', ack.status === 200 && Boolean(ack.body?.data?.acknowledgedAt), ack.body);
+
+    const afterAck = await call('GET', '/api/alerts');
+    check('an acknowledged alert leaves the default list',
+      !(afterAck.body?.data ?? []).some((a: any) => a.id === alerts[0].id), alerts[0].id);
+
+    const withAck = await call('GET', '/api/alerts?includeAcknowledged=true');
+    check('acknowledged alerts are still retrievable',
+      (withAck.body?.data ?? []).some((a: any) => a.id === alerts[0].id));
+    check('an acknowledged alert records who acknowledged it',
+      (withAck.body?.data ?? []).find((a: any) => a.id === alerts[0].id)?.acknowledgedBy !== null);
+
+    const reopen = await call('POST', `/api/alerts/${alerts[0].id}/acknowledge`, { token: trainerToken, body: { acknowledged: false } });
+    check('an acknowledged alert can be reopened', reopen.status === 200 && reopen.body?.data?.acknowledgedAt === null, reopen.body);
+
+    const missing = await call('POST', '/api/alerts/does-not-exist/acknowledge', { body: { acknowledged: true } });
+    check('acknowledging an unknown alert is a 404', missing.status === 404, missing.status);
+
+    // Thresholds drive the rules, so tightening them has to change the outcome.
+    const before = (await call('GET', '/api/alerts/summary')).body?.data?.total ?? 0;
+    const strict = await call('PATCH', '/api/settings/alerts.rules', {
+      body: { value: { enabled: true, inactivityDays: 1, minProgressSolved: 10000, ratingDropThreshold: 1, contestInactivityDays: 1, staleDataDays: 365, brokenProfileDays: 0, mutedTypes: [] }, recompute: true },
+    });
+    check('tightening the thresholds re-runs the rules', strict.status === 200 && strict.body.realerted > 0, strict.body);
+    const after = (await call('GET', '/api/alerts/summary')).body?.data?.total ?? 0;
+    check('impossible thresholds flag more students than the defaults', after > before, { before, after });
+
+    const muted = await call('PATCH', '/api/settings/alerts.rules', {
+      body: { value: { enabled: true, inactivityDays: 1, minProgressSolved: 10000, ratingDropThreshold: 1, contestInactivityDays: 1, staleDataDays: 365, brokenProfileDays: 0, mutedTypes: ['NO_PROGRESS'] }, recompute: true },
+    });
+    check('a muted alert type stops being raised',
+      muted.status === 200 && !((await call('GET', '/api/alerts?pageSize=200')).body?.data ?? []).some((a: any) => a.type === 'NO_PROGRESS'));
+
+    const disabled = await call('PATCH', '/api/settings/alerts.rules', {
+      body: { value: { enabled: false }, recompute: true },
+    });
+    check('disabling the rules clears the list',
+      disabled.status === 200 && ((await call('GET', '/api/alerts?pageSize=200')).body?.data ?? []).length === 0, disabled.body);
+
+    const reset = await call('POST', '/api/settings/alerts.rules/reset', { body: { recompute: true } });
+    check('resetting the rules restores the defaults and re-alerts',
+      reset.status === 200 && reset.body.data.value.inactivityDays === 21 && reset.body.realerted > 0, reset.body);
+  }
+
   // --------------------------------------------------------------- reports
   section('Reports');
   {

@@ -127,7 +127,51 @@ All analytics endpoints accept the same filter parameters as `/students`.
 | POST | `/settings/cache/purge` | ADMIN | Clear cached platform responses |
 
 Keys: `scoring.weights`, `scoring.targets`, `skills.thresholds`,
-`processing.limits`, `cache.settings`, `ui.platformColors`.
+`processing.limits`, `cache.settings`, `ui.platformColors`,
+`processing.schedule`, `alerts.rules`.
+
+Updating `alerts.rules` with `recompute: true` re-runs the rules against every
+student and returns `realerted` — the number re-evaluated — alongside the usual
+`recomputed`.
+
+## Alerts
+
+| Method | Path | Role | Description |
+|---|---|---|---|
+| GET | `/alerts` | any | Open alerts, most severe and longest-standing first |
+| GET | `/alerts/types` | any | The alert catalogue with display labels |
+| GET | `/alerts/summary` | any | Counts by severity and by type |
+| POST | `/alerts/:id/acknowledge` | TRAINER | Acknowledge (`{"acknowledged": false}` reopens) |
+| POST | `/alerts/recompute` | TRAINER | Re-run the rules for every student |
+
+`/alerts` accepts the `/students` filters plus `type`, `severity`,
+`includeAcknowledged`, `page` and `pageSize`. Every alert carries an `evidence`
+object holding the two observations the rule compared, so the claim can be
+checked rather than trusted.
+
+Types: `NO_PROGRESS`, `RATING_DECLINE`, `CONTEST_INACTIVE`, `NO_DATA`,
+`PROFILE_UNAVAILABLE`, `NO_PLATFORM_HANDLES`, `STALE_DATA`.
+
+The last three describe our data, not the student. `STALE_DATA` also suppresses
+`NO_PROGRESS` and `RATING_DECLINE` for that student: if we stopped fetching, we
+cannot tell whether they stopped working.
+
+Alerts are re-evaluated automatically whenever a student's analytics are
+rebuilt, so a refresh keeps the list current without a separate call. An alert
+is keyed on `(student, type)`, so `detectedAt` keeps answering "since when";
+when a rule stops firing its alert is deleted rather than left to go stale.
+
+## Schedule
+
+| Method | Path | Role | Description |
+|---|---|---|---|
+| GET | `/schedule` | any | Schedule, next/previous run and the last 10 runs |
+| POST | `/schedule/run-now` | TRAINER | Start a refresh immediately, outside the schedule |
+
+`run-now` is independent of the schedule: it starts even when the day's slot has
+already been used and even when automatic refresh is switched off. It returns
+202 with the job when a refresh starts, 200 with a reason when it does not
+(everything still inside the cache window, no handles on file).
 
 ## Health
 

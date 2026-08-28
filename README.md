@@ -19,6 +19,8 @@ platform rate-limited us, that is recorded and displayed as such — never as `0
 - [Configuration](#configuration)
 - [Importing students](#importing-students)
 - [Processing and rate limiting](#processing-and-rate-limiting)
+- [Scheduled refresh](#scheduled-refresh)
+- [Alerts: who needs attention](#alerts-who-needs-attention)
 - [The Competitive Programming Score](#the-competitive-programming-score)
 - [Reports](#reports)
 - [Testing](#testing)
@@ -204,10 +206,14 @@ backend/
     topics.ts                 Canonical topic names across platforms
     leetcode|codechef|hackerrank|codeforces/
     mock/                     Deterministic sample source
-  src/modules/                auth · students · upload · jobs · analytics · reports · settings
+  src/modules/                auth · students · upload · jobs · analytics · reports
+                              settings · alerts · schedule
   src/services/               ingestion · processing · analytics · scoring · settings
+    alerts.service.ts         The needs-attention rules (pure, so they are testable)
+    schedule.service.ts       Time-zone and DST-correct slot arithmetic
+    scheduler.ts              The loop, slot claiming and manual runs
   src/queue/                  Redis and in-process drivers behind one interface
-  tests/                      101 tests
+  tests/                      149 tests
 frontend/
   src/api/                    Typed client with silent token refresh
   src/components/             Shared UI and chart primitives
@@ -235,6 +241,15 @@ the local default; `redis` (BullMQ) scales to multiple worker processes. Job
 *state* lives in the database either way, so a restart resumes cleanly —
 interrupted items are re-queued at boot.
 
+**Scheduled slots are claimed by inserting a row.** The scheduled run's slot
+instant is unique, so the database settles the race between workers without an
+external lock, and a restart cannot re-fire a slot that already went.
+
+**The alert rules are a pure function.** `evaluateRules()` takes snapshots and
+thresholds and returns concerns; nothing in it touches the database. Every rule,
+including the ordering that stops a stale-data gap being reported as a student
+failing to progress, is tested directly against fabricated histories.
+
 ---
 
 ## Configuration
@@ -253,7 +268,8 @@ full list. The ones that matter most:
 | `QUEUE_CONCURRENCY` | `4` | Worker concurrency |
 
 Scoring weights, score targets, skill thresholds, per-platform rate limits,
-cache durations and platform colours are **runtime settings**, editable by an
+cache durations, platform colours, the refresh schedule and the
+needs-attention thresholds are **runtime settings**, editable by an
 administrator in the Settings screen without a redeploy.
 
 ---
@@ -311,6 +327,79 @@ not start existing.
 
 ---
 
+## Scheduled refresh
+
+Refreshing every profile by hand is the step that quietly stops happening, and
+stale numbers are worse than no numbers because they still look like answers. So
+the refresh can run itself: **Settings → Automation** sets a daily or weekly
+time, in a real IANA time zone, and the app fetches everyone on that schedule.
+
+The parts that matter in practice:
+
+- **Time zones are honoured properly.** 02:00 in `Asia/Kolkata` is 02:00 there
+  all year. Where a clock jumps forward and the chosen time does not exist that
+  day, the run happens at the first instant that does — never an hour early.
+- **A slot fires once.** Workers claim a slot by inserting a row keyed on the
+  slot instant, so the unique index settles the race: however many processes are
+  running, exactly one wins, and a restart cannot re-fire a slot that already
+  went.
+- **A missed slot is not fired late.** If the app was down past the grace window
+  (12 hours by default), the slot is recorded as `SKIPPED` rather than kicking
+  off a surprise full refresh in the middle of a working day.
+- **The history is visible.** The Automation tab lists the last ten runs with
+  their status and job number, so "did last night's refresh actually run?" is a
+  question with an answer on screen.
+
+**Refresh everyone now** starts a run immediately, independently of the
+schedule — it works when the day's slot is already spent and when automatic
+refresh is switched off entirely, because someone pressed the button.
+
+Finding nothing to do is a success, not a failure: an unforced refresh shortly
+after a manual one legitimately finds every profile still inside the cache
+window, and the run is recorded as `COMPLETED`.
+
+---
+
+## Alerts: who needs attention
+
+A leaderboard shows who is ahead. It does not show the student who has not
+solved anything in three weeks, because they are somewhere in the middle of a
+long list. The **Needs attention** screen is that missing view.
+
+| Alert | Fires when |
+|---|---|
+| `NO_PROGRESS` | Solved count moved by at most the threshold over the window (default: 0 in 21 days) |
+| `RATING_DECLINE` | Rating fell by at least the threshold from a recent peak (default: 100) |
+| `CONTEST_INACTIVE` | No new contest entry for the configured period (default: 60 days) |
+| `NO_DATA` | Handles are on file but nothing has ever been retrieved |
+| `PROFILE_UNAVAILABLE` | A handle has been failing as not-found, private or erroring |
+| `NO_PLATFORM_HANDLES` | No handles on file, so nothing can be fetched |
+| `STALE_DATA` | We have not refreshed this student recently enough to judge |
+
+Two rules run through all of it:
+
+**A student is never blamed for a gap in our own data collection.** If the last
+successful fetch is older than the staleness threshold, the engine raises
+`STALE_DATA` and stops — it does not also raise `NO_PROGRESS`. Not knowing
+whether someone is working is a different statement from knowing they are not,
+and the app makes that distinction rather than blurring it. The last three rows
+of the table are operator problems; the screen groups them separately, under
+"needs a data fix" rather than "needs coaching".
+
+**Every alert carries its evidence.** The two observations the rule compared,
+with their dates and values, travel with the alert and are shown on screen, so a
+trainer can check the claim instead of trusting it. `Solved count moved by 0 in
+21 days (1 → 1)` is a statement someone can argue with; "inactive" is not.
+
+Alerts are keyed on `(student, type)`, so `detectedAt` keeps answering "since
+when" as an alert persists across refreshes, and an alert is deleted when its
+rule stops firing rather than being left to rot. They are recomputed whenever a
+student's analytics are rebuilt, and can be acknowledged (and reopened) by
+trainers. Thresholds live in **Settings → Automation**; changing them offers to
+re-run the rules immediately so the list matches the numbers on screen.
+
+---
+
 ## The Competitive Programming Score
 
 A 0–100 composite computed **by this application**. It is not an official
@@ -358,16 +447,17 @@ Two layers: fast tests that need no server, and end-to-end suites that drive the
 running application.
 
 ```bash
-npm test          # 107 unit + integration tests
-npm run e2e       # 275 end-to-end checks against a running app
+npm test          # 149 unit + integration tests
+npm run e2e       # 345 end-to-end checks against a running app
 ```
 
 ### Unit and integration
 
-107 tests covering topic normalization, scoring and skill levels, all four
+149 tests covering topic normalization, scoring and skill levels, all four
 platform parsers, rate limiting and backoff, Excel reading and column mapping,
-row validation, the full upload → process → analytics pipeline against a real
-database, and the REST API including authentication and authorization.
+row validation, schedule arithmetic across time zones and daylight saving, every
+needs-attention rule, the full upload → process → analytics pipeline against a
+real database, and the REST API including authentication and authorization.
 
 Tests never touch a real platform — `DATA_SOURCE=mock` is forced in
 `tests/setup.ts`.
@@ -379,11 +469,11 @@ automatically. Test files run sequentially because they share that database.
 ### End-to-end
 
 `npm run e2e` needs the app running and a freshly seeded database — see
-[`e2e/README.md`](e2e/README.md). It runs 138 API checks (every endpoint,
-authn/authz, upload → process → retry, reports, error paths) and 137 browser
-checks (every screen, forms, filters, sorting, pagination, the upload wizard,
-modals, downloads, theming, mobile), plus a regression guard for the session
-refresh race.
+[`e2e/README.md`](e2e/README.md). It runs 187 API checks (every endpoint,
+authn/authz, upload → process → retry, reports, scheduling, the alert rules,
+error paths) and 158 browser checks (every screen, forms, filters, sorting,
+pagination, the upload wizard, modals, downloads, theming, mobile), plus a
+regression guard for the session refresh race.
 
 ### What the tests have caught
 
@@ -407,6 +497,20 @@ End-to-end found three more that unit tests structurally could not:
   offered a recompute; resetting them did not, so the leaderboard kept showing
   scores calculated under the old weights with nothing to indicate it. Reset now
   recomputes exactly as saving does.
+- **A nightly job would have run an hour early twice a year.** Converting a wall
+  clock to an instant resolved *backwards* across a spring-forward gap, so 02:30
+  on a day when 02:30 does not exist became 01:30 rather than 03:30. The
+  conversion now round-trips and takes the later candidate.
+- **The inactivity rule could essentially never fire.** It filtered snapshots to
+  the window before measuring the change across it, which discarded the older
+  reading it needed to compare against. It now takes the most recent observation
+  *at or before* the window start.
+- **"Run now" did nothing once the day's slot had gone.** It was routed through
+  the same claim as the scheduler, so the button was dead for the rest of the
+  day. A manual run is now keyed on the instant it was requested.
+- **The audit trail forgot that a run was manual.** Finishing a job overwrote the
+  run's note with its outcome, so "somebody pressed the button" was lost.
+  How a run started is now a field of its own.
 
 ---
 
@@ -461,3 +565,10 @@ identifiers and public data.
 **Scale.** Every list endpoint is paginated, hot columns are indexed, analytics
 are materialized, imports and analytics rebuilds run in bounded batches, and the
 UI never loads more than a page of students at a time.
+
+**The scheduler is safe to run everywhere.** Every API and worker process starts
+the loop; slot claiming means only one of them fires each occurrence, so there
+is no "which container owns cron" question to get wrong. Set the schedule's time
+outside working hours — a full refresh of 10,000 students is a long run against
+rate-limited platforms, and the grace window exists so that a deploy or a short
+outage does not turn into one starting at 11am.

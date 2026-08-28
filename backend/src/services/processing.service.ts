@@ -227,14 +227,21 @@ async function finalizeJobIfDone(jobId: string): Promise<void> {
   const job = await prisma.processingJob.findUnique({ where: { id: jobId }, select: { status: true, failed: true, rateLimited: true } });
   if (!job || ['COMPLETED', 'COMPLETED_WITH_ERRORS', 'CANCELLED', 'FAILED'].includes(job.status)) return;
 
+  const status = job.failed + job.rateLimited > 0 ? 'COMPLETED_WITH_ERRORS' : 'COMPLETED';
   await prisma.processingJob.update({
     where: { id: jobId },
-    data: {
-      status: job.failed + job.rateLimited > 0 ? 'COMPLETED_WITH_ERRORS' : 'COMPLETED',
-      finishedAt: new Date(),
-      currentStudent: null,
-    },
+    data: { status, finishedAt: new Date(), currentStudent: null },
   });
+
+  // Close out the scheduled slot that started this job, if any, so the
+  // automation screen shows an outcome rather than a permanent "started".
+  await prisma.scheduledRun
+    .updateMany({
+      where: { jobId, status: 'STARTED' },
+      data: { status: 'COMPLETED', finishedAt: new Date(), note: `Job finished as ${status}` },
+    })
+    .catch(() => undefined);
+
   logger.info(`Processing job ${jobId} finished`);
 }
 

@@ -12,6 +12,7 @@ import JobsPage from './pages/JobsPage';
 import JobDetailPage from './pages/JobDetailPage';
 import LeaderboardPage from './pages/LeaderboardPage';
 import AnalyticsPage from './pages/AnalyticsPage';
+import AlertsPage from './pages/AlertsPage';
 import BatchPage from './pages/BatchPage';
 import CollegesPage from './pages/CollegesPage';
 import ComparePage from './pages/ComparePage';
@@ -53,6 +54,7 @@ export default function App() {
           <Route path="/jobs/:id" element={<JobDetailPage />} />
           <Route path="/leaderboard" element={<LeaderboardPage />} />
           <Route path="/analytics" element={<AnalyticsPage />} />
+          <Route path="/alerts" element={<AlertsPage />} />
           <Route path="/batches" element={<BatchPage />} />
           <Route path="/colleges" element={<CollegesPage />} />
           <Route path="/platforms" element={<PlatformsPage />} />

@@ -1,9 +1,11 @@
 import { api } from './client';
 import type {
+  AlertSummary,
   BatchAnalytics, ColumnMapping, CommitResult, ContestResponse, DifficultyAnalytics, FieldDefinition,
   FilterOptions, HistoryPoint, InstitutionRow, JobItem, JobProgress, JobSummary, LeaderboardRow,
   Overview, Paginated, Platform, PlatformMeta, PlatformProfile, RatingSeries, ScoreBreakdown,
-  SettingsResponse, StudentDetail, StudentSummary, TopicAnalytics, TopicCount, UploadPreview, User,
+  ScheduleStatus, SettingsResponse, StudentAlert, StudentDetail, StudentSummary, TopicAnalytics,
+  TopicCount, UploadPreview, User,
 } from '../types/api';
 
 export type QueryParams = Record<string, string | number | boolean | undefined | null>;
@@ -141,12 +143,12 @@ export const leaderboardApi = {
 export const settingsApi = {
   get: () => api.get<SettingsResponse>('/api/settings').then((r) => r.data),
   update: (key: string, value: Record<string, unknown>, recompute = false) =>
-    api.patch<{ data: { key: string; value: Record<string, unknown> }; recomputed?: number }>(
+    api.patch<{ data: { key: string; value: Record<string, unknown> }; recomputed?: number; realerted?: number }>(
       `/api/settings/${encodeURIComponent(key)}`, { value, recompute },
     ).then((r) => r.data),
   reset: (key: string, recompute = true) =>
     api
-      .post<{ data: { key: string; value: Record<string, unknown> }; recomputed?: number }>(
+      .post<{ data: { key: string; value: Record<string, unknown> }; recomputed?: number; realerted?: number }>(
         `/api/settings/${encodeURIComponent(key)}/reset`,
         { recompute },
       )
@@ -154,4 +156,27 @@ export const settingsApi = {
   platforms: () => api.get<{ data: PlatformMeta[]; dataSource: string }>('/api/settings/platforms/meta').then((r) => r.data),
   purgeCache: (payload: { platform?: Platform; expiredOnly?: boolean }) =>
     api.post<{ removed: number }>('/api/settings/cache/purge', payload).then((r) => r.data),
+};
+
+// -- alerts ------------------------------------------------------------------
+export const alertsApi = {
+  types: () => api.get<{ data: { type: string; label: string }[] }>('/api/alerts/types').then((r) => r.data.data),
+  list: (params: QueryParams = {}) =>
+    api
+      .get<Paginated<StudentAlert> & { summary: AlertSummary }>('/api/alerts', { params: cleanParams(params) })
+      .then((r) => r.data),
+  summary: (params: QueryParams = {}) =>
+    api.get<{ data: AlertSummary }>('/api/alerts/summary', { params: cleanParams(params) }).then((r) => r.data.data),
+  acknowledge: (id: string, acknowledged: boolean) =>
+    api.post(`/api/alerts/${id}/acknowledge`, { acknowledged }).then((r) => r.data),
+  recompute: () => api.post<{ message: string; evaluated: number }>('/api/alerts/recompute').then((r) => r.data),
+};
+
+// -- automation --------------------------------------------------------------
+export const scheduleApi = {
+  status: () => api.get<{ data: ScheduleStatus }>('/api/schedule').then((r) => r.data.data),
+  runNow: () =>
+    api
+      .post<{ data: { ran: boolean; reason?: string; jobId?: string; jobNumber?: number } }>('/api/schedule/run-now')
+      .then((r) => r.data.data),
 };

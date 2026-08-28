@@ -5,6 +5,7 @@ import { PLATFORMS } from '../config/platforms.js';
 import { normalizeTopic } from '../platforms/topics.js';
 import { calculateScore, calculateSkill, type ScoreInputs, type ScoreResult } from './scoring.js';
 import { getScoringTargets, getScoringWeights, getSkillThresholds } from './settings.service.js';
+import { evaluateStudentAlerts } from './alerts.service.js';
 
 /**
  * Recomputes the derived analytics for one student and materializes them into
@@ -158,6 +159,12 @@ export async function recomputeStudentAnalytics(studentId: string): Promise<void
   ]);
 
   await writeAggregateSnapshot(studentId, analyticsData);
+
+  // The needs-attention rules read the snapshot just written, so they run last
+  // and never take the recompute down with them.
+  await evaluateStudentAlerts(studentId).catch((err) =>
+    logger.warn(`Alert evaluation failed for student ${studentId}`, (err as Error).message),
+  );
 }
 
 /** Topics with at least one problem solved inside the recency window. */

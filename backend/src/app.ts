@@ -15,6 +15,7 @@ import { analyticsRouter } from './modules/analytics/analytics.routes.js';
 import { leaderboardRouter } from './modules/analytics/leaderboard.routes.js';
 import { reportsRouter } from './modules/reports/report.routes.js';
 import { settingsRouter } from './modules/settings/settings.routes.js';
+import { alertsRouter, scheduleRouter } from './modules/alerts/alerts.routes.js';
 import { prisma } from './db/prisma.js';
 
 export function createApp() {
@@ -87,6 +88,8 @@ export function createApp() {
   app.use('/api/leaderboard', leaderboardRouter);
   app.use('/api/reports', reportsRouter);
   app.use('/api/settings', settingsRouter);
+  app.use('/api/alerts', alertsRouter);
+  app.use('/api/schedule', scheduleRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
