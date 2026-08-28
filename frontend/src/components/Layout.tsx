@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import {
   BarChart3, Building2, GitCompare, LayoutDashboard, ListChecks, LogOut, Menu, Monitor,
-  Moon, Search, Settings, ShieldAlert, Sun, Trophy, Upload, Users, Layers, X,
+  Moon, Search, Settings, ShieldAlert, Sun, Target, Trophy, Upload, Users, Layers, X,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useTheme } from '../hooks/useTheme';
@@ -22,6 +22,7 @@ const NAV_SECTIONS: {
       { to: '/leaderboard', label: 'Leaderboard', icon: Trophy },
       { to: '/analytics', label: 'Analytics', icon: BarChart3 },
       { to: '/alerts', label: 'Needs attention', icon: ShieldAlert, badge: 'alerts' },
+      { to: '/goals', label: 'Goals', icon: Target },
     ],
   },
   {

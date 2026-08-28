@@ -6,10 +6,11 @@ import { errorMessage } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
 import { Callout, Card, LoadingBlock, PageHeader, Spinner, Tabs, useToast } from '../components/ui';
 import { AutomationSettings } from '../components/AutomationSettings';
+import { ShareLinksSettings } from '../components/ShareLinksSettings';
 import { num } from '../lib/format';
 import type { Platform } from '../types/api';
 
-type TabId = 'scoring' | 'skills' | 'processing' | 'automation' | 'appearance';
+type TabId = 'scoring' | 'skills' | 'processing' | 'automation' | 'links' | 'appearance';
 
 export default function SettingsPage() {
   const { can } = useAuth();
@@ -47,6 +48,7 @@ export default function SettingsPage() {
             { id: 'skills', label: 'Skill levels' },
             { id: 'processing', label: 'Processing' },
             { id: 'automation', label: 'Automation' },
+            { id: 'links', label: 'Student links' },
             { id: 'appearance', label: 'Appearance' },
           ]}
         />
@@ -55,6 +57,7 @@ export default function SettingsPage() {
           {tab === 'skills' && <SkillSettings settings={settings.data!} editable={can('ADMIN')} />}
           {tab === 'processing' && <ProcessingSettings settings={settings.data!} editable={can('ADMIN')} />}
           {tab === 'automation' && <AutomationSettings settings={settings.data!} editable={can('ADMIN')} />}
+          {tab === 'links' && <ShareLinksSettings editable={can('TRAINER')} />}
           {tab === 'appearance' && <AppearanceSettings settings={settings.data!} editable={can('ADMIN')} />}
         </div>
       </Card>

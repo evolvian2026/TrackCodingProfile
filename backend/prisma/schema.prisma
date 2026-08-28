@@ -114,6 +114,18 @@ enum ScheduledRunStatus {
   SKIPPED
 }
 
+/// What a goal measures. Every one of these maps to a column the analytics
+/// layer already records, and to a flag saying whether it was knowable — a
+/// target on a metric a student's platforms do not publish is unmeasurable for
+/// that student, not failed.
+enum GoalMetric {
+  PROBLEMS_SOLVED
+  CONTESTS_ATTENDED
+  CP_SCORE
+  CONTEST_RATING
+  TOPICS_COVERED
+}
+
 /// How a refresh run was started. Kept apart from the note, because the note is
 /// overwritten with the outcome once the job finishes and "somebody pressed the
 /// button" has to survive that.
@@ -141,17 +153,19 @@ model User {
   processingJobs     ProcessingJob[]
   refreshTokens      RefreshToken[]
   acknowledgedAlerts StudentAlert[]
+  goals              Goal[]
+  shareLinks         StudentShareLink[]
 
   @@map("users")
 }
 
 model RefreshToken {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   userId    String
-  tokenHash String   @unique
+  tokenHash String    @unique
   expiresAt DateTime
   revokedAt DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -180,17 +194,18 @@ model Student {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  profiles        PlatformProfile[]
-  solvedProblems  StudentProblem[]
-  topics          StudentTopic[]
-  contestResults  ContestResult[]
-  ratingHistory   RatingHistory[]
-  snapshots       DataSnapshot[]
-  jobItems        ProcessingJobItem[]
-  errors          PlatformError[]
-  analytics       StudentAnalytics?
-  skills          StudentSkill[]
-  alerts          StudentAlert[]
+  profiles       PlatformProfile[]
+  solvedProblems StudentProblem[]
+  topics         StudentTopic[]
+  contestResults ContestResult[]
+  ratingHistory  RatingHistory[]
+  snapshots      DataSnapshot[]
+  jobItems       ProcessingJobItem[]
+  errors         PlatformError[]
+  analytics      StudentAnalytics?
+  skills         StudentSkill[]
+  alerts         StudentAlert[]
+  shareLink      StudentShareLink?
 
   @@index([college])
   @@index([batch])
@@ -207,16 +222,16 @@ model Student {
 // ---------------------------------------------------------------------------
 
 model PlatformProfile {
-  id        String   @id @default(cuid())
-  studentId String
-  platform  Platform
-  username  String
+  id         String   @id @default(cuid())
+  studentId  String
+  platform   Platform
+  username   String
   profileUrl String?
 
-  status        DataStatus @default(PENDING)
-  statusMessage String?
-  lastFetchedAt DateTime?
-  lastSuccessAt DateTime?
+  status          DataStatus @default(PENDING)
+  statusMessage   String?
+  lastFetchedAt   DateTime?
+  lastSuccessAt   DateTime?
   fetchDurationMs Int?
 
   // Identity ---------------------------------------------------------------
@@ -254,11 +269,11 @@ model PlatformProfile {
 
   // Platform specific, kept as JSON so adapters can evolve independently ----
   problemSolvingScore Float?
-  badges       Json?
-  certificates Json?
-  skills       Json?
-  domains      Json?
-  raw          Json?
+  badges              Json?
+  certificates        Json?
+  skills              Json?
+  domains             Json?
+  raw                 Json?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -288,8 +303,8 @@ model Problem {
   points     Int?
   createdAt  DateTime   @default(now())
 
-  topics         ProblemTopic[]
-  studentSolves  StudentProblem[]
+  topics        ProblemTopic[]
+  studentSolves StudentProblem[]
 
   @@unique([platform, externalId])
   @@index([platform, difficulty])
@@ -320,13 +335,13 @@ model ProblemTopic {
 }
 
 model StudentProblem {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   studentId String
   problemId String
   platform  Platform
   solvedAt  DateTime?
   attempts  Int?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
   problem Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
@@ -341,12 +356,12 @@ model StudentProblem {
 /// directly (without a full problem list), so this is stored as its own fact
 /// table rather than derived from `student_problems`.
 model StudentTopic {
-  id            String   @id @default(cuid())
-  studentId     String
-  platform      Platform
-  topic         String
+  id             String   @id @default(cuid())
+  studentId      String
+  platform       Platform
+  topic          String
   problemsSolved Int
-  updatedAt     DateTime @updatedAt
+  updatedAt      DateTime @updatedAt
 
   student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
@@ -361,13 +376,13 @@ model StudentTopic {
 // ---------------------------------------------------------------------------
 
 model Contest {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
   platform   Platform
   externalId String
   name       String
   startTime  DateTime?
   url        String?
-  createdAt  DateTime @default(now())
+  createdAt  DateTime  @default(now())
 
   results ContestResult[]
 
@@ -377,7 +392,7 @@ model Contest {
 }
 
 model ContestResult {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   studentId      String
   contestId      String
   platform       Platform
@@ -387,7 +402,7 @@ model ContestResult {
   ratingChange   Int?
   problemsSolved Int?
   participatedAt DateTime?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime  @default(now())
 
   student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
   contest Contest @relation(fields: [contestId], references: [id], onDelete: Cascade)
@@ -399,13 +414,13 @@ model ContestResult {
 }
 
 model RatingHistory {
-  id         String   @id @default(cuid())
-  studentId  String
-  platform   Platform
-  rating     Int
-  recordedAt DateTime
+  id          String   @id @default(cuid())
+  studentId   String
+  platform    Platform
+  rating      Int
+  recordedAt  DateTime
   /// "contest" when derived from a contest result, "snapshot" when sampled.
-  source     String   @default("snapshot")
+  source      String   @default("snapshot")
   contestName String?
 
   student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
@@ -452,23 +467,23 @@ model DataSnapshot {
 // ---------------------------------------------------------------------------
 
 model UploadBatch {
-  id           String   @id @default(cuid())
-  originalName String
-  storedPath   String?
-  sizeBytes    Int
-  sheetName    String?
-  totalRows    Int      @default(0)
-  validRows    Int      @default(0)
-  invalidRows  Int      @default(0)
-  duplicateRows Int     @default(0)
-  createdCount Int      @default(0)
-  updatedCount Int      @default(0)
-  mapping      Json?
-  headers      Json?
-  issues       Json?
-  status       String   @default("PENDING")
-  uploadedById String?
-  createdAt    DateTime @default(now())
+  id            String   @id @default(cuid())
+  originalName  String
+  storedPath    String?
+  sizeBytes     Int
+  sheetName     String?
+  totalRows     Int      @default(0)
+  validRows     Int      @default(0)
+  invalidRows   Int      @default(0)
+  duplicateRows Int      @default(0)
+  createdCount  Int      @default(0)
+  updatedCount  Int      @default(0)
+  mapping       Json?
+  headers       Json?
+  issues        Json?
+  status        String   @default("PENDING")
+  uploadedById  String?
+  createdAt     DateTime @default(now())
 
   uploadedBy User?           @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
   jobs       ProcessingJob[]
@@ -478,33 +493,33 @@ model UploadBatch {
 }
 
 model ProcessingJob {
-  id            String    @id @default(cuid())
+  id             String     @id @default(cuid())
   /// Human-friendly sequential number shown in the UI ("Job #124").
-  number        Int       @unique @default(autoincrement())
-  type          JobType
-  status        JobStatus @default(QUEUED)
-  platforms     Platform[]
-  totalStudents Int       @default(0)
-  totalItems    Int       @default(0)
-  processed     Int       @default(0)
-  successful    Int       @default(0)
-  failed        Int       @default(0)
-  rateLimited   Int       @default(0)
-  skipped       Int       @default(0)
+  number         Int        @unique @default(autoincrement())
+  type           JobType
+  status         JobStatus  @default(QUEUED)
+  platforms      Platform[]
+  totalStudents  Int        @default(0)
+  totalItems     Int        @default(0)
+  processed      Int        @default(0)
+  successful     Int        @default(0)
+  failed         Int        @default(0)
+  rateLimited    Int        @default(0)
+  skipped        Int        @default(0)
   currentStudent String?
-  forceRefresh  Boolean   @default(false)
-  error         String?
-  options       Json?
-  startedAt     DateTime?
-  finishedAt    DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  forceRefresh   Boolean    @default(false)
+  error          String?
+  options        Json?
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
 
   createdById   String?
   uploadBatchId String?
 
-  createdBy   User?        @relation(fields: [createdById], references: [id], onDelete: SetNull)
-  uploadBatch UploadBatch? @relation(fields: [uploadBatchId], references: [id], onDelete: SetNull)
+  createdBy   User?               @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  uploadBatch UploadBatch?        @relation(fields: [uploadBatchId], references: [id], onDelete: SetNull)
   items       ProcessingJobItem[]
   errors      PlatformError[]
 
@@ -562,28 +577,28 @@ model PlatformError {
 model StudentAnalytics {
   studentId String @id
 
-  totalSolved     Int   @default(0)
-  easySolved      Int   @default(0)
-  mediumSolved    Int   @default(0)
-  hardSolved      Int   @default(0)
-  platformsActive Int   @default(0)
-  totalContests   Int   @default(0)
+  totalSolved     Int      @default(0)
+  easySolved      Int      @default(0)
+  mediumSolved    Int      @default(0)
+  hardSolved      Int      @default(0)
+  platformsActive Int      @default(0)
+  totalContests   Int      @default(0)
   bestRank        Int?
   avgRank         Float?
   bestRating      Int?
   currentRating   Int?
-  topicCount      Int   @default(0)
-  topicCoverage   Float @default(0)
-  cpScore         Float @default(0)
+  topicCount      Int      @default(0)
+  topicCoverage   Float    @default(0)
+  cpScore         Float    @default(0)
   scoreBreakdown  Json?
   /// Set when no platform returned usable data — keeps "unknown" out of rankings.
-  hasData         Boolean @default(false)
+  hasData         Boolean  @default(false)
   /// Whether ANY platform that returned data actually publishes this metric.
   /// Without these, a student whose only working platform is CodeChef would
   /// show "0 topics" and "0 easy" — asserting a zero we never observed.
-  difficultyKnown Boolean @default(false)
-  topicsKnown     Boolean @default(false)
-  contestsKnown   Boolean @default(false)
+  difficultyKnown Boolean  @default(false)
+  topicsKnown     Boolean  @default(false)
+  contestsKnown   Boolean  @default(false)
   computedAt      DateTime @default(now())
 
   student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
@@ -622,21 +637,21 @@ model StudentSkill {
 /// rot. `evidence` always carries the numbers the rule fired on, so a coach can
 /// see why without trusting the label.
 model StudentAlert {
-  id         String        @id @default(cuid())
-  studentId  String
-  type       AlertType
-  severity   AlertSeverity
-  message    String
+  id               String        @id @default(cuid())
+  studentId        String
+  type             AlertType
+  severity         AlertSeverity
+  message          String
   /// The observations behind the alert (values, dates, window length).
-  evidence   Json?
-  detectedAt DateTime      @default(now())
-  updatedAt  DateTime      @updatedAt
+  evidence         Json?
+  detectedAt       DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
   /// Set when someone has seen it and does not need it in the default view.
   acknowledgedAt   DateTime?
   acknowledgedById String?
 
-  student       Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  acknowledgedBy User?  @relation(fields: [acknowledgedById], references: [id], onDelete: SetNull)
+  student        Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  acknowledgedBy User?   @relation(fields: [acknowledgedById], references: [id], onDelete: SetNull)
 
   @@unique([studentId, type])
   @@index([type, severity])
@@ -683,13 +698,86 @@ model AppSetting {
 /// Response cache for platform fetches, so a refresh of 10k students does not
 /// re-hit a platform for data that is still fresh.
 model PlatformCache {
-  key       String   @id
+  key       String     @id
   platform  Platform
   payload   Json
   status    DataStatus
-  fetchedAt DateTime @default(now())
+  fetchedAt DateTime   @default(now())
   expiresAt DateTime
 
   @@index([platform, expiresAt])
   @@map("platform_cache")
+}
+
+// ---------------------------------------------------------------------------
+// Goals and shareable student views
+// ---------------------------------------------------------------------------
+
+/// A target set for a cohort. Scope fields left null widen the cohort, so a goal
+/// with every scope null applies to everyone.
+model Goal {
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+
+  university String?
+  college    String?
+  batch      String?
+  branch     String?
+  section    String?
+
+  /// Progress is measured against absolute totals, not gains since this date;
+  /// startsOn exists so the UI can show how much of the window has elapsed and
+  /// so observed pace is measured over the right period.
+  startsOn DateTime
+  dueOn    DateTime
+  isActive Boolean  @default(true)
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy User?        @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  targets   GoalTarget[]
+
+  @@index([isActive, dueOn])
+  @@index([batch])
+  @@index([college])
+  @@map("goals")
+}
+
+model GoalTarget {
+  id     String     @id @default(cuid())
+  goalId String
+  metric GoalMetric
+  /// Float so CP score targets are expressible; whole numbers everywhere else.
+  target Float
+
+  goal Goal @relation(fields: [goalId], references: [id], onDelete: Cascade)
+
+  @@unique([goalId, metric])
+  @@map("goal_targets")
+}
+
+/// A read-only link that lets one student see their own record without an
+/// account. The token is stored hashed, exactly like a refresh token, so a
+/// database read cannot hand someone a working link.
+model StudentShareLink {
+  id        String @id @default(cuid())
+  studentId String @unique
+  tokenHash String @unique
+
+  createdById  String?
+  createdAt    DateTime  @default(now())
+  expiresAt    DateTime?
+  revokedAt    DateTime?
+  /// Usage, so a coordinator can see whether the links are being opened at all.
+  lastViewedAt DateTime?
+  viewCount    Int       @default(0)
+
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  createdBy User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([revokedAt])
+  @@map("student_share_links")
 }

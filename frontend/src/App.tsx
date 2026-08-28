@@ -18,6 +18,8 @@ import CollegesPage from './pages/CollegesPage';
 import ComparePage from './pages/ComparePage';
 import PlatformsPage from './pages/PlatformsPage';
 import SettingsPage from './pages/SettingsPage';
+import GoalsPage from './pages/GoalsPage';
+import SharedProfilePage from './pages/SharedProfilePage';
 
 export default function App() {
   const { user, loading } = useAuth();
@@ -34,6 +36,9 @@ export default function App() {
   if (!user) {
     return (
       <Routes>
+        {/* A student opening their own link has no account, so this route has
+            to resolve before the sign-in redirect rather than after it. */}
+        <Route path="/me/:token" element={<SharedProfilePage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
@@ -44,6 +49,9 @@ export default function App() {
     <FiltersProvider>
       <Routes>
         <Route path="/login" element={<Navigate to="/" replace />} />
+        {/* Outside the shell in both states: a coordinator following a link
+            should see exactly what the student sees. */}
+        <Route path="/me/:token" element={<SharedProfilePage />} />
         <Route element={<Layout />}>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/students" element={<StudentsPage />} />
@@ -55,6 +63,7 @@ export default function App() {
           <Route path="/leaderboard" element={<LeaderboardPage />} />
           <Route path="/analytics" element={<AnalyticsPage />} />
           <Route path="/alerts" element={<AlertsPage />} />
+          <Route path="/goals" element={<GoalsPage />} />
           <Route path="/batches" element={<BatchPage />} />
           <Route path="/colleges" element={<CollegesPage />} />
           <Route path="/platforms" element={<PlatformsPage />} />

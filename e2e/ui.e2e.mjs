@@ -428,6 +428,120 @@ try {
   check('appearance warns that defaults are accessibility-checked',
     await page.getByText(/accessibility-checked, not brand-exact/i).isVisible());
 
+  // ------------------------------------------------------------------ goals
+  section('Goals');
+  await page.goto(`${BASE}/goals`, { waitUntil: 'networkidle' });
+  await settle(1800);
+  check('the goals screen renders', await page.getByRole('heading', { name: 'Goals' }).first().isVisible());
+
+  const goalCards = page.locator('main .card').filter({ hasText: /days left|Overdue/ });
+  const seededGoals = await goalCards.count();
+  check('the seeded goals are listed', seededGoals > 0, seededGoals);
+  await tryCheck('a goal names the cohort it applies to', async () =>
+    /2023-26|Everyone/.test(await goalCards.first().innerText()));
+  await tryCheck('a goal shows how many are meeting each target', async () =>
+    /measurable/.test(await goalCards.first().innerText()));
+  await tryCheck('progress bars render for each target', async () =>
+    (await goalCards.first().locator('[role=progressbar]').count()) > 0);
+
+  // Every cohort figure has to open into the names behind it.
+  const drill = page.getByRole('button', { name: /met$|short$/ }).first();
+  if (await drill.count()) {
+    await drill.click();
+    await settle(1600);
+    check('a cohort figure opens into the students behind it',
+      await page.getByRole('dialog').isVisible());
+    await tryCheck('the roster names students', async () =>
+      (await page.getByRole('dialog').locator('tbody tr').count()) > 0);
+    await page.getByRole('button', { name: 'Close' }).click();
+    await settle(700);
+  }
+
+  // Create a goal, confirm it measures, then remove it.
+  await page.getByRole('button', { name: /New goal/ }).click();
+  await settle(900);
+  check('the goal editor opens', await page.getByRole('dialog').isVisible());
+  await page.locator('input[placeholder="Placement readiness"]').fill('E2E temporary goal');
+  await page.locator('div[role=dialog] input[type=number]').first().fill('1');
+  await settle(400);
+  await page.getByRole('button', { name: 'Create goal' }).click();
+  await settle(2500);
+  check('the new goal appears on the page', (await page.getByText('E2E temporary goal').count()) > 0);
+  await tryCheck('a target of 1 is met by nearly everyone', async () =>
+    /100(\.0)?%|9\d(\.\d)?%/.test(await page.locator('main .card').filter({ hasText: 'E2E temporary goal' }).innerText()));
+
+  page.once('dialog', (d) => void d.accept());
+  await page
+    .locator('main .card')
+    .filter({ hasText: 'E2E temporary goal' })
+    .getByRole('button', { name: 'Delete' })
+    .click();
+  await settle(2200);
+  check('a goal can be deleted', (await page.getByText('E2E temporary goal').count()) === 0);
+
+  // ------------------------------------------------------- student view links
+  section('Student view link');
+  await page.goto(`${BASE}/students`, { waitUntil: 'networkidle' });
+  await settle(1500);
+  await page.locator('tbody tr a').first().click();
+  await settle(2200);
+  check('the student page offers a view link', await page.getByText('Student view link').isVisible());
+
+  const createLink = page.getByRole('button', { name: /Create link|Regenerate/ });
+  await createLink.click();
+  await settle(2200);
+  check('issuing a link shows it once, with a warning', await page.getByText(/will not be shown again/i).isVisible());
+
+  const linkInput = page.locator('input[readonly]').first();
+  const shareUrl = await linkInput.inputValue();
+  check('the issued link points at the student view route', /\/me\/[A-Za-z0-9_-]{20,}/.test(shareUrl), shareUrl);
+  check('the panel reports the link as active', /Active/.test(await page.locator('main').innerText()));
+
+  await page.reload({ waitUntil: 'networkidle' });
+  await settle(1800);
+  check('the link is not shown again after a reload',
+    (await page.locator('input[readonly]').count()) === 0);
+
+  // -------------------------------------------------------- the student's view
+  section('Student self-service view');
+  const sharePath = new URL(shareUrl).pathname;
+  const anon = await context.browser().newContext({ viewport: { width: 1280, height: 900 } });
+  const anonPage = await anon.newPage();
+  const anonErrors = [];
+  anonPage.on('pageerror', (e) => anonErrors.push(e.message));
+
+  await anonPage.goto(`${BASE}${sharePath}`, { waitUntil: 'networkidle' });
+  await anonPage.waitForTimeout(2500);
+
+  const shared = await anonPage.locator('body').innerText();
+  check('a signed-out visitor is not redirected to the login page', !anonPage.url().includes('/login'), anonPage.url());
+  check('the page identifies itself as the student’s own profile', /Your coding profile/i.test(shared), shared.slice(0, 120));
+  check('it shows the platforms section', /Your platforms/i.test(shared));
+  check('it shows where to focus next', /Where to focus next/i.test(shared));
+  check('it labels the CP score as unofficial', /not an official score/i.test(shared));
+  check('the application shell is absent — no nav to anywhere else',
+    (await anonPage.getByRole('link', { name: 'Leaderboard' }).count()) === 0);
+  check('no other student is named on the page',
+    !/Students tracked|Top performers/.test(shared));
+  check('the student view renders without a page error', anonErrors.length === 0, anonErrors);
+
+  await anonPage.goto(`${BASE}/me/not-a-real-token`, { waitUntil: 'networkidle' });
+  await anonPage.waitForTimeout(2000);
+  check('an invalid link says so plainly rather than erroring',
+    /not valid/i.test(await anonPage.locator('body').innerText()));
+
+  // A share link must not be a way into the rest of the app.
+  await anonPage.goto(`${BASE}/students`, { waitUntil: 'networkidle' });
+  await anonPage.waitForTimeout(1800);
+  check('holding a share link does not sign anyone in', anonPage.url().includes('/login'), anonPage.url());
+  await anon.close();
+
+  // And the coordinator can revoke it.
+  await page.getByRole('button', { name: /Revoke/ }).click();
+  await settle(2200);
+  check('a link can be revoked from the student page',
+    /Revoked/.test(await page.locator('main').innerText()));
+
   // ----------------------------------------------------------------- alerts
   section('Needs attention');
   await page.goto(`${BASE}/alerts`, { waitUntil: 'networkidle' });
@@ -535,6 +649,20 @@ try {
   await page.getByRole('button', { name: /Save schedule/ }).click();
   await settle(2000);
 
+  await page.getByRole('tab', { name: 'Student links' }).click();
+  await settle(1800);
+  check('the student-links tab lists who has a link',
+    await page.getByRole('heading', { name: 'Student view links' }).first().isVisible());
+  await tryCheck('it reports how many links are active', async () =>
+    /active of \d+ students/.test(await page.locator('main').innerText()));
+  await page.getByRole('button', { name: /Issue links/ }).click();
+  await settle(3000);
+  await tryCheck('issuing in bulk offers an export while the links still exist', async () => {
+    const text = await page.locator('main').innerText();
+    // Either links were issued (export offered) or everyone already had one.
+    return /Download CSV for mail merge/.test(text) || /Nothing to issue/.test(text);
+  });
+
   // ------------------------------------------------------------------- theme
   section('Theme and navigation');
   await page.goto(`${BASE}/`, { waitUntil: 'networkidle' });
@@ -561,7 +689,8 @@ try {
   for (const [label, path] of [
     ['Dashboard', '/'], ['Leaderboard', '/leaderboard'], ['Analytics', '/analytics'],
     ['Students', '/students'], ['Compare', '/compare'], ['Batches', '/batches'],
-    ['Colleges', '/colleges'], ['Needs attention', '/alerts'], ['Upload Excel', '/upload'], ['Processing', '/jobs'],
+    ['Colleges', '/colleges'], ['Needs attention', '/alerts'], ['Goals', '/goals'],
+    ['Upload Excel', '/upload'], ['Processing', '/jobs'],
     ['Platforms', '/platforms'], ['Settings', '/settings'],
   ]) {
     // The needs-attention link carries a live count, so its accessible name

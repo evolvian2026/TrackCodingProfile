@@ -58,6 +58,7 @@ services:
       DATA_SOURCE: ${DATA_SOURCE:-mock}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8080}
+      APP_BASE_URL: ${APP_BASE_URL:-}
       TRUST_PROXY: 'true'
       SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@tracker.local}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-Admin@12345}

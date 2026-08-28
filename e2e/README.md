@@ -6,8 +6,8 @@ need no server.
 
 | Suite | What it covers |
 |---|---|
-| `api.e2e.ts` | Every REST endpoint, authn/authz, upload → process → retry, reports, data-integrity rules, scheduled refresh, the needs-attention rules, error paths (187 checks) |
-| `ui.e2e.mjs` | Every screen driven through a real browser: forms, filters, sorting, pagination, tabs, the upload wizard, modals, downloads, theming, mobile (158 checks) |
+| `api.e2e.ts` | Every REST endpoint, authn/authz, upload → process → retry, reports, data-integrity rules, scheduled refresh, the needs-attention rules, goals, share links, error paths (245 checks) |
+| `ui.e2e.mjs` | Every screen driven through a real browser: forms, filters, sorting, pagination, tabs, the upload wizard, modals, downloads, the signed-out student view, theming, mobile (189 checks) |
 | `session-race.e2e.mjs` | Regression guard for the rotating-refresh-token race that could sign a valid user out |
 
 ## Running them

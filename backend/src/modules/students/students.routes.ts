@@ -10,6 +10,7 @@ import { createProcessingJob } from '../../services/processing.service.js';
 import { recomputeStudentAnalytics } from '../../services/analytics.service.js';
 import { invalidateCache } from '../../platforms/cache.js';
 import * as students from './students.service.js';
+import { getGoalsForStudent } from '../../services/goals.service.js';
 
 const platformEnum = z.enum(ALL_PLATFORMS as [string, ...string[]]);
 
@@ -186,6 +187,14 @@ studentsRouter.get(
   asyncHandler(async (req, res) => {
     const { platform, days } = parsedQuery<{ platform?: never; days: number }>(req);
     res.json({ data: await students.getStudentHistory(req.params.id!, platform, days) });
+  }),
+);
+
+studentsRouter.get(
+  '/:id/goals',
+  asyncHandler(async (req, res) => {
+    const student = await students.getStudentOrThrow(req.params.id!);
+    res.json({ data: await getGoalsForStudent(student.id) });
   }),
 );
 

@@ -6,6 +6,7 @@ import type {
   Overview, Paginated, Platform, PlatformMeta, PlatformProfile, RatingSeries, ScoreBreakdown,
   ScheduleStatus, SettingsResponse, StudentAlert, StudentDetail, StudentSummary, TopicAnalytics,
   TopicCount, UploadPreview, User,
+  Goal, GoalMetric, GoalRosterRow, IssuedShareLink, ShareLinkRow, ShareLinkStatus, SharedProfile, StudentGoal,
 } from '../types/api';
 
 export type QueryParams = Record<string, string | number | boolean | undefined | null>;
@@ -179,4 +180,49 @@ export const scheduleApi = {
     api
       .post<{ data: { ran: boolean; reason?: string; jobId?: string; jobNumber?: number } }>('/api/schedule/run-now')
       .then((r) => r.data.data),
+};
+
+// -- goals -------------------------------------------------------------------
+export const goalsApi = {
+  metrics: () =>
+    api
+      .get<{ data: { metric: GoalMetric; label: string; decimals: number }[] }>('/api/goals/metrics')
+      .then((r) => r.data.data),
+  list: (params: QueryParams = {}) =>
+    api.get<{ data: Goal[] }>('/api/goals', { params: cleanParams(params) }).then((r) => r.data.data),
+  get: (id: string) => api.get<{ data: Goal }>(`/api/goals/${id}`).then((r) => r.data.data),
+  roster: (id: string, params: QueryParams = {}) =>
+    api
+      .get<Paginated<GoalRosterRow>>(`/api/goals/${id}/students`, { params: cleanParams(params) })
+      .then((r) => r.data),
+  create: (body: Record<string, unknown>) => api.post<{ data: Goal }>('/api/goals', body).then((r) => r.data.data),
+  update: (id: string, body: Record<string, unknown>) =>
+    api.patch<{ data: Goal }>(`/api/goals/${id}`, body).then((r) => r.data.data),
+  remove: (id: string) => api.delete(`/api/goals/${id}`).then((r) => r.data),
+  forStudent: (studentId: string) =>
+    api.get<{ data: StudentGoal[] }>(`/api/students/${studentId}/goals`).then((r) => r.data.data),
+};
+
+// -- shareable student links --------------------------------------------------
+export const shareApi = {
+  status: (studentId: string) =>
+    api.get<{ data: ShareLinkStatus | null }>(`/api/students/${studentId}/share-link`).then((r) => r.data.data),
+  issue: (studentId: string, expiresAt?: string | null) =>
+    api
+      .post<{ data: IssuedShareLink; message: string }>(`/api/students/${studentId}/share-link`, { expiresAt })
+      .then((r) => r.data),
+  revoke: (studentId: string) => api.delete(`/api/students/${studentId}/share-link`).then((r) => r.data),
+  issueMany: (body: Record<string, unknown>) =>
+    api
+      .post<{ data: IssuedShareLink[]; issued: number; skipped: number; message: string }>('/api/share-links', body)
+      .then((r) => r.data),
+  list: (params: QueryParams = {}) =>
+    api
+      .get<{ data: ShareLinkRow[]; baseUrl: string; configuredBaseUrl: boolean }>('/api/share-links', {
+        params: cleanParams(params),
+      })
+      .then((r) => r.data),
+  /** The public read. No Authorization header — that is the whole point. */
+  shared: (token: string) =>
+    api.get<{ data: SharedProfile }>(`/api/shared/${encodeURIComponent(token)}`).then((r) => r.data.data),
 };

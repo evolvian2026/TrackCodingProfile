@@ -26,7 +26,8 @@ export async function truncateAll(): Promise<void> {
       problem_topics, student_problems, student_topics, contests, contest_results,
       rating_history, data_snapshots, upload_batches, processing_jobs,
       processing_job_items, platform_errors, student_analytics, student_skills,
-      student_alerts, scheduled_runs, app_settings, platform_cache
+      student_alerts, scheduled_runs, goal_targets, goals, student_share_links,
+      app_settings, platform_cache
     RESTART IDENTITY CASCADE
   `);
 }

@@ -173,6 +173,75 @@ already been used and even when automatic refresh is switched off. It returns
 202 with the job when a refresh starts, 200 with a reason when it does not
 (everything still inside the cache window, no handles on file).
 
+## Goals
+
+| Method | Path | Role | Description |
+|---|---|---|---|
+| GET | `/goals` | any | Active goals with cohort progress (`includeInactive=true` for archived) |
+| GET | `/goals/metrics` | any | The metric catalogue with labels and decimal places |
+| GET | `/goals/:id` | any | One goal with its progress |
+| GET | `/goals/:id/students` | any | The students behind the roll-up |
+| POST | `/goals` | TRAINER | Create a goal |
+| PATCH | `/goals/:id` | TRAINER | Update it; passing `targets` replaces them wholesale |
+| DELETE | `/goals/:id` | TRAINER | Delete it |
+| GET | `/students/:id/goals` | any | Every active goal covering one student |
+
+Metrics: `PROBLEMS_SOLVED`, `CONTESTS_ATTENDED`, `CP_SCORE`, `CONTEST_RATING`,
+`TOPICS_COVERED`. Targets are absolute totals to reach, not gains.
+
+A goal's scope is the set of `university` / `college` / `batch` / `branch` /
+`section` fields it sets; a null field widens it, and all null means everyone.
+
+Each student scores one of four outcomes per target:
+
+| Outcome | Meaning |
+|---|---|
+| `MET` | At or above the target |
+| `BEHIND` | Measurable and short, with `remaining` |
+| `UNKNOWN` | No platform of theirs publishes this metric |
+| `NO_DATA` | Nothing has ever been retrieved for them |
+
+`metRate` is computed over `MET + BEHIND` only, and is **null**, never `0`, when
+nobody in scope can be measured — 0% would read as "everybody failed" when what
+happened is that nobody could be assessed. `/goals/:id/students` accepts
+`metric` and `outcome` so every cohort figure opens into the names behind it,
+including the unmeasurable ones.
+
+`/students/:id/goals` additionally returns `requiredPerWeek` (arithmetic on the
+shortfall and the deadline, not a prediction) and `observedGain` /
+`observedOverDays` from dated snapshots — null when there are not two readings
+to subtract.
+
+## Student view links
+
+| Method | Path | Role | Description |
+|---|---|---|---|
+| GET | `/shared/:token` | **none** | A student's own read-only view |
+| GET | `/students/:id/share-link` | any | Whether a link exists and its usage |
+| POST | `/students/:id/share-link` | TRAINER | Issue or regenerate; returns the URL **once** |
+| DELETE | `/students/:id/share-link` | TRAINER | Revoke |
+| POST | `/share-links` | TRAINER | Issue for a cohort, returning every URL once |
+| GET | `/share-links` | any | Who has a link, and whether it has been opened |
+
+`/shared/:token` is the only unauthenticated endpoint besides `/health`. It
+carries its own rate limit (120 per 15 minutes) and returns exactly one
+student's record: their platforms with real statuses, skills, topics, history,
+goals and rank — never their email, phone, internal notes, or any other student.
+
+Tokens are 32 random bytes stored **hashed**, like refresh tokens, so a database
+read cannot produce a working link. That is why the URL is returned only at the
+moment it is issued, and why a lost link is regenerated rather than recovered.
+
+Revoked, expired, unknown and deleted all return the same 404 message: telling
+an anonymous caller which case it was is free information about who exists.
+
+`POST /share-links` skips students who already hold a live link unless
+`regenerateExisting: true` — silently reissuing would break links already sitting
+in inboxes. The response reports `issued` and `skipped`.
+
+Set `APP_BASE_URL` to the address students reach the app on; without it links are
+built from the first `CORS_ORIGIN`.
+
 ## Health
 
 `GET /api/health` — no authentication. Returns 200 when the database is

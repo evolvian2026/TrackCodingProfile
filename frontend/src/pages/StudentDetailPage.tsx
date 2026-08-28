@@ -12,6 +12,8 @@ import {
 } from '../components/ui';
 import { CategoryBars, CompositionBar, MultiLineChart, ScoreGauge } from '../components/charts';
 import { StudentEditModal } from '../components/StudentEditModal';
+import { StudentGoalsCard } from '../components/StudentGoalsCard';
+import { ShareLinkPanel } from '../components/ShareLinkPanel';
 import { decimal, formatDate, num, ordinalRank, percent, relativeTime, STATUS_PRESENTATION } from '../lib/format';
 import { difficultyColor } from '../lib/palette';
 import type { PlatformProfile, StudentSkill } from '../types/api';
@@ -136,6 +138,8 @@ export default function StudentDetailPage() {
         </div>
       )}
 
+      <StudentGoalsCard studentId={id} />
+
       {/* Headline metrics */}
       <div className="mb-5 grid gap-4 lg:grid-cols-[auto_1fr]">
         <Card className="flex items-center gap-5 p-5">
@@ -177,6 +181,8 @@ export default function StudentDetailPage() {
           data.platforms.map((profile) => <PlatformCard key={profile.id} profile={profile} />)
         )}
       </div>
+
+      <ShareLinkPanel studentId={id} studentName={data.name} />
 
       {editing && <StudentEditModal student={data} open={editing} onClose={() => setEditing(false)} />}
 

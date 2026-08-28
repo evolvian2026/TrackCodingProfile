@@ -21,6 +21,8 @@ platform rate-limited us, that is recorded and displayed as such — never as `0
 - [Processing and rate limiting](#processing-and-rate-limiting)
 - [Scheduled refresh](#scheduled-refresh)
 - [Alerts: who needs attention](#alerts-who-needs-attention)
+- [Goals and progress to target](#goals-and-progress-to-target)
+- [The student's own view](#the-students-own-view)
 - [The Competitive Programming Score](#the-competitive-programming-score)
 - [Reports](#reports)
 - [Testing](#testing)
@@ -207,13 +209,15 @@ backend/
     leetcode|codechef|hackerrank|codeforces/
     mock/                     Deterministic sample source
   src/modules/                auth · students · upload · jobs · analytics · reports
-                              settings · alerts · schedule
+                              settings · alerts · schedule · goals · share
   src/services/               ingestion · processing · analytics · scoring · settings
     alerts.service.ts         The needs-attention rules (pure, so they are testable)
     schedule.service.ts       Time-zone and DST-correct slot arithmetic
     scheduler.ts              The loop, slot claiming and manual runs
+    goals.service.ts          Target measurement, including the unmeasurable cases
+    share.service.ts          Hashed read-only links and the student's own view
   src/queue/                  Redis and in-process drivers behind one interface
-  tests/                      149 tests
+  tests/                      208 tests
 frontend/
   src/api/                    Typed client with silent token refresh
   src/components/             Shared UI and chart primitives
@@ -400,6 +404,89 @@ re-run the rules immediately so the list matches the numbers on screen.
 
 ---
 
+## Goals and progress to target
+
+Training programs are run against goals, so the dashboards should be too. An
+administrator sets a target for a cohort — *2023-26 CSE: 300 solved and 5
+contests by December* — and the Goals screen reports how the batch is doing
+against it.
+
+A goal's scope is whichever of college / batch / branch / section it names; the
+fields it leaves blank widen it, and a goal that names none applies to everyone.
+Targets are absolute totals to reach, not gains since the start date.
+
+**The question this feature turns on: what does a target mean for a student
+whose platforms do not publish the metric?** Counting them as "not met" would
+report a gap in the platforms' data as a student falling short, which is the
+mistake the rest of the app exists to avoid. So every student scores one of four
+outcomes per target:
+
+| Outcome | Meaning |
+|---|---|
+| **Met** | At or above the target |
+| **Short** | Measurable and behind, with the shortfall |
+| **Not measurable** | No platform of theirs publishes this metric |
+| **No data** | Nothing has ever been retrieved for them |
+
+The percentage is computed over the students it is *measurable* for, and the
+rest are reported in their own columns rather than folded in. When nobody in
+scope can be measured, the rate is **not shown at all** rather than shown as 0% —
+0% reads as "everybody failed"; the truth is "we cannot say".
+
+Two things keep the numbers arguable-with rather than merely assertive:
+
+- **Every cohort figure opens into the names behind it.** Clicking "6 short"
+  lists those six students with their current value against the target — and the
+  unmeasurable students are just as reachable, not quietly hidden.
+- **A student behind a target is told the pace that closes it.** "70 to go,
+  about 35 a week from here" is arithmetic on the shortfall and the deadline,
+  deliberately not a prediction of whether they will make it. Alongside it sits
+  what they actually did — "gained 60 over the last 27 days" — from dated
+  snapshots, so the reader draws the comparison rather than the app asserting
+  one.
+
+---
+
+## The student's own view
+
+Everything above is for coordinators. But the person who most needs to see a
+weak-topics breakdown is the student, and provisioning several hundred accounts
+to show each of them one page is a poor trade.
+
+So each student gets a **read-only link**. Opening it shows their own record —
+platforms with honest statuses, strongest topics, where to focus next, their
+goals with progress, their position in their batch, and a progress chart — with
+no account, no navigation, and no way into anything else.
+
+What makes it safe to hand out:
+
+- **The token is stored hashed**, exactly like a refresh token. A database dump,
+  a log line or a screenshot of that table hands nobody a working link. The
+  consequence is deliberate: the URL is shown **once**, at the moment it is
+  issued, and a lost link is regenerated rather than recovered.
+- **It carries no contact details.** No email, no phone, no internal notes —
+  and no other student, by name or otherwise. The rank is included because a
+  position without identities is motivating rather than exposing.
+- **Revoked, expired, unknown and deleted all answer identically.** Telling an
+  anonymous caller which case it was is free information about who exists.
+- **It is not a way in.** The link authenticates nothing; visiting any other
+  page still lands on the sign-in screen.
+- **Our own failures stay ours.** A `STALE_DATA` alert — we stopped refreshing
+  this student — is filtered out of the student's view. It is not news they can
+  act on, and showing it to them reports our problem as though it were theirs.
+
+Links are issued one at a time from a student's page, or for a whole cohort from
+**Settings → Student links**, which returns every URL once with a CSV export for
+a mail merge. Reissuing skips students who already hold a live link unless you
+explicitly ask to replace them — silently regenerating would break links already
+sitting in inboxes. The same screen shows which links have actually been opened,
+so a batch nobody clicked is visible rather than assumed successful.
+
+Set `APP_BASE_URL` to the address students reach the app on; without it, links
+are built from the first `CORS_ORIGIN`.
+
+---
+
 ## The Competitive Programming Score
 
 A 0–100 composite computed **by this application**. It is not an official
@@ -447,17 +534,19 @@ Two layers: fast tests that need no server, and end-to-end suites that drive the
 running application.
 
 ```bash
-npm test          # 149 unit + integration tests
-npm run e2e       # 345 end-to-end checks against a running app
+npm test          # 208 unit + integration tests
+npm run e2e       # 436 end-to-end checks against a running app
 ```
 
 ### Unit and integration
 
-149 tests covering topic normalization, scoring and skill levels, all four
+208 tests covering topic normalization, scoring and skill levels, all four
 platform parsers, rate limiting and backoff, Excel reading and column mapping,
 row validation, schedule arithmetic across time zones and daylight saving, every
-needs-attention rule, the full upload → process → analytics pipeline against a
-real database, and the REST API including authentication and authorization.
+needs-attention rule, goal measurement including the unmeasurable cases, share
+link issuing and revocation, the full upload → process → analytics pipeline
+against a real database, and the REST API including authentication and
+authorization.
 
 Tests never touch a real platform — `DATA_SOURCE=mock` is forced in
 `tests/setup.ts`.
@@ -469,11 +558,12 @@ automatically. Test files run sequentially because they share that database.
 ### End-to-end
 
 `npm run e2e` needs the app running and a freshly seeded database — see
-[`e2e/README.md`](e2e/README.md). It runs 187 API checks (every endpoint,
+[`e2e/README.md`](e2e/README.md). It runs 245 API checks (every endpoint,
 authn/authz, upload → process → retry, reports, scheduling, the alert rules,
-error paths) and 158 browser checks (every screen, forms, filters, sorting,
-pagination, the upload wizard, modals, downloads, theming, mobile), plus a
-regression guard for the session refresh race.
+goals, share links, error paths) and 189 browser checks (every screen, forms,
+filters, sorting, pagination, the upload wizard, modals, downloads, the
+signed-out student view, theming, mobile), plus a regression guard for the
+session refresh race.
 
 ### What the tests have caught
 
@@ -511,6 +601,10 @@ End-to-end found three more that unit tests structurally could not:
 - **The audit trail forgot that a run was manual.** Finishing a job overwrote the
   run's note with its outcome, so "somebody pressed the button" was lost.
   How a run started is now a field of its own.
+- **Every unknown route started answering 401 instead of 404.** Mounting the
+  share-link admin routes at `/api` put a blanket auth check in front of the
+  whole prefix, so "no such route" became "you are not signed in". They are
+  mounted on their own paths now.
 
 ---
 
@@ -560,7 +654,9 @@ limiting with a stricter limit on sign-in, Zod validation on every request body
 and query, upload type and size limits with server-generated filenames,
 parameterized queries throughout via Prisma, and Helmet security headers. No
 platform passwords are ever requested or stored — only public profile
-identifiers and public data.
+identifiers and public data. Student view links are 32 random bytes stored
+hashed and rate-limited separately; they authenticate nothing beyond the one
+record they point at.
 
 **Scale.** Every list endpoint is paginated, hot columns are indexed, analytics
 are materialized, imports and analytics rebuilds run in bounded batches, and the

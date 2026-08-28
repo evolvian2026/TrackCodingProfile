@@ -334,6 +334,248 @@ describe('upload API', () => {
   });
 });
 
+
+describe('goals', () => {
+  const goalBody = (overrides: Record<string, unknown> = {}) => ({
+    name: 'Placement readiness',
+    batch: '2023-26',
+    startsOn: new Date(Date.now() - 86_400_000).toISOString(),
+    dueOn: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+    targets: [{ metric: 'PROBLEMS_SOLVED', target: 200 }],
+    ...overrides,
+  });
+
+  it('creates a goal and reports cohort progress with it', async () => {
+    const token = await tokenFor(ADMIN.email, ADMIN.password);
+    await seedStudentWithData('7001', 'Goal Student', 'goal_cf');
+
+    const created = await request(app)
+      .post('/api/goals')
+      .set('Authorization', `Bearer ${token}`)
+      .send(goalBody())
+      .expect(201);
+
+    expect(created.body.data.scope).toBe('2023-26');
+    expect(created.body.data.progress.studentsInScope).toBe(1);
+    expect(created.body.data.targets[0].label).toBe('Problems solved');
+  });
+
+  it('refuses a goal that is due before it starts', async () => {
+    const token = await tokenFor(ADMIN.email, ADMIN.password);
+    const res = await request(app)
+      .post('/api/goals')
+      .set('Authorization', `Bearer ${token}`)
+      .send(goalBody({ dueOn: new Date(Date.now() - 30 * 86_400_000).toISOString() }))
+      .expect(400);
+    expect(res.body.error.message).toMatch(/after the start date/i);
+  });
+
+  it('refuses a goal with no targets, which would measure nothing', async () => {
+    const token = await tokenFor(ADMIN.email, ADMIN.password);
+    await request(app)
+      .post('/api/goals')
+      .set('Authorization', `Bearer ${token}`)
+      .send(goalBody({ targets: [] }))
+      .expect(400);
+  });
+
+  it('lets a viewer read goals but not create them', async () => {
+    const admin = await tokenFor(ADMIN.email, ADMIN.password);
+    await request(app).post('/api/goals').set('Authorization', `Bearer ${admin}`).send(goalBody()).expect(201);
+
+    const viewer = await tokenFor(VIEWER.email, VIEWER.password);
+    await request(app).get('/api/goals').set('Authorization', `Bearer ${viewer}`).expect(200);
+    await request(app).post('/api/goals').set('Authorization', `Bearer ${viewer}`).send(goalBody()).expect(403);
+  });
+
+  it('opens a cohort figure into the students behind it', async () => {
+    const token = await tokenFor(ADMIN.email, ADMIN.password);
+    await seedStudentWithData('7001', 'Goal Student', 'goal_cf');
+    const goal = await request(app)
+      .post('/api/goals')
+      .set('Authorization', `Bearer ${token}`)
+      .send(goalBody({ targets: [{ metric: 'PROBLEMS_SOLVED', target: 1_000_000 }] }))
+      .expect(201);
+
+    const roster = await request(app)
+      .get(`/api/goals/${goal.body.data.id}/students?outcome=BEHIND`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(roster.body.data).toHaveLength(1);
+    expect(roster.body.data[0].targets[0].outcome).toBe('BEHIND');
+  });
+
+  it('shows a student the goals that cover them', async () => {
+    const token = await tokenFor(ADMIN.email, ADMIN.password);
+    const student = await seedStudentWithData('7001', 'Goal Student', 'goal_cf');
+    await request(app).post('/api/goals').set('Authorization', `Bearer ${token}`).send(goalBody()).expect(201);
+
+    const res = await request(app)
+      .get(`/api/students/${student.id}/goals`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(res.body.data).toHaveLength(1);
+  });
+
+  it('replaces targets wholesale on edit rather than merging them', async () => {
+    const token = await tokenFor(ADMIN.email, ADMIN.password);
+    const goal = await request(app)
+      .post('/api/goals')
+      .set('Authorization', `Bearer ${token}`)
+      .send(goalBody({ targets: [{ metric: 'PROBLEMS_SOLVED', target: 200 }, { metric: 'CONTESTS_ATTENDED', target: 3 }] }))
+      .expect(201);
+
+    const updated = await request(app)
+      .patch(`/api/goals/${goal.body.data.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ targets: [{ metric: 'CP_SCORE', target: 70 }] })
+      .expect(200);
+
+    expect(updated.body.data.targets).toHaveLength(1);
+    expect(updated.body.data.targets[0].metric).toBe('CP_SCORE');
+  });
+
+  it('deletes a goal and its targets', async () => {
+    const token = await tokenFor(ADMIN.email, ADMIN.password);
+    const goal = await request(app).post('/api/goals').set('Authorization', `Bearer ${token}`).send(goalBody()).expect(201);
+
+    await request(app).delete(`/api/goals/${goal.body.data.id}`).set('Authorization', `Bearer ${token}`).expect(204);
+    await request(app).get(`/api/goals/${goal.body.data.id}`).set('Authorization', `Bearer ${token}`).expect(404);
+    expect(await prisma.goalTarget.count()).toBe(0);
+  });
+});
+
+describe('shareable student links', () => {
+  it('serves a student their own record without a token', async () => {
+    const token = await tokenFor(ADMIN.email, ADMIN.password);
+    const student = await seedStudentWithData('8001', 'Shared Student', 'share_cf');
+
+    const issued = await request(app)
+      .post(`/api/students/${student.id}/share-link`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({})
+      .expect(201);
+
+    const shareToken = issued.body.data.url.split('/me/')[1];
+    // No Authorization header: this is the whole point of the feature.
+    const view = await request(app).get(`/api/shared/${shareToken}`).expect(200);
+    expect(view.body.data.student.name).toBe('Shared Student');
+  });
+
+  it('gives the same answer for revoked, expired and never-existed links', async () => {
+    const token = await tokenFor(ADMIN.email, ADMIN.password);
+    const student = await seedStudentWithData('8001', 'Shared Student', 'share_cf');
+    const issued = await request(app)
+      .post(`/api/students/${student.id}/share-link`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({})
+      .expect(201);
+    const shareToken = issued.body.data.url.split('/me/')[1];
+
+    await request(app).delete(`/api/students/${student.id}/share-link`).set('Authorization', `Bearer ${token}`).expect(204);
+
+    const revoked = await request(app).get(`/api/shared/${shareToken}`).expect(404);
+    const unknown = await request(app).get('/api/shared/never-issued').expect(404);
+    // Telling an anonymous caller which case it was is free information about
+    // who exists.
+    expect(revoked.body.error.message).toBe(unknown.body.error.message);
+  });
+
+  it('never returns the link again after issuing it', async () => {
+    const token = await tokenFor(ADMIN.email, ADMIN.password);
+    const student = await seedStudentWithData('8001', 'Shared Student', 'share_cf');
+    await request(app)
+      .post(`/api/students/${student.id}/share-link`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({})
+      .expect(201);
+
+    const status = await request(app)
+      .get(`/api/students/${student.id}/share-link`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(status.body.data.active).toBe(true);
+    expect(status.body.data.url).toBeNull();
+  });
+
+  it('does not let a viewer issue or revoke links', async () => {
+    const admin = await tokenFor(ADMIN.email, ADMIN.password);
+    const student = await seedStudentWithData('8001', 'Shared Student', 'share_cf');
+    await request(app).post(`/api/students/${student.id}/share-link`).set('Authorization', `Bearer ${admin}`).send({}).expect(201);
+
+    const viewer = await tokenFor(VIEWER.email, VIEWER.password);
+    await request(app).post(`/api/students/${student.id}/share-link`).set('Authorization', `Bearer ${viewer}`).send({}).expect(403);
+    await request(app).delete(`/api/students/${student.id}/share-link`).set('Authorization', `Bearer ${viewer}`).expect(403);
+    // Reading the status is fine; it carries no credential.
+    await request(app).get(`/api/students/${student.id}/share-link`).set('Authorization', `Bearer ${viewer}`).expect(200);
+  });
+
+  it('issues links for a cohort without disturbing the ones already sent out', async () => {
+    const token = await tokenFor(ADMIN.email, ADMIN.password);
+    const first = await seedStudentWithData('8001', 'First', 'first_cf');
+    await seedStudentWithData('8002', 'Second', 'second_cf');
+
+    const existing = await request(app)
+      .post(`/api/students/${first.id}/share-link`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({})
+      .expect(201);
+
+    const bulk = await request(app)
+      .post('/api/share-links')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ scope: 'filtered', batch: '2023-26' })
+      .expect(201);
+
+    expect(bulk.body.issued).toBe(1);
+    expect(bulk.body.skipped).toBe(1);
+    // The link already in somebody's inbox still works.
+    await request(app).get(`/api/shared/${existing.body.data.url.split('/me/')[1]}`).expect(200);
+  });
+
+  it('regenerates in bulk only when explicitly asked, and the old link dies', async () => {
+    const token = await tokenFor(ADMIN.email, ADMIN.password);
+    const student = await seedStudentWithData('8001', 'First', 'first_cf');
+    const existing = await request(app)
+      .post(`/api/students/${student.id}/share-link`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({})
+      .expect(201);
+
+    const bulk = await request(app)
+      .post('/api/share-links')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ scope: 'all', regenerateExisting: true })
+      .expect(201);
+
+    expect(bulk.body.issued).toBe(1);
+    await request(app).get(`/api/shared/${existing.body.data.url.split('/me/')[1]}`).expect(404);
+  });
+
+  it('reports who has a link and whether it has been opened', async () => {
+    const token = await tokenFor(ADMIN.email, ADMIN.password);
+    const student = await seedStudentWithData('8001', 'First', 'first_cf');
+    await seedStudentWithData('8002', 'Second', 'second_cf');
+    await request(app).post(`/api/students/${student.id}/share-link`).set('Authorization', `Bearer ${token}`).send({}).expect(201);
+
+    const res = await request(app).get('/api/share-links').set('Authorization', `Bearer ${token}`).expect(200);
+    expect(res.body.data.filter((r: { hasLink: boolean }) => r.hasLink)).toHaveLength(1);
+    expect(res.body.data.filter((r: { hasLink: boolean }) => !r.hasLink)).toHaveLength(1);
+  });
+
+  it('refuses an expiry date that has already passed', async () => {
+    const token = await tokenFor(ADMIN.email, ADMIN.password);
+    const student = await seedStudentWithData('8001', 'First', 'first_cf');
+    await request(app)
+      .post(`/api/students/${student.id}/share-link`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ expiresAt: new Date(Date.now() - 1000).toISOString() })
+      .expect(400);
+  });
+});
+
 describe('error handling', () => {
   it('reports a malformed JSON body as 400, not 500', async () => {
     const token = await tokenFor(ADMIN.email, ADMIN.password);

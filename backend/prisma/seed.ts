@@ -334,6 +334,51 @@ async function seedHistory(studentIds: string[]) {
   logger.info(`Seeded ${created} historical snapshots`);
 }
 
+
+/**
+ * Two goals covering different cohorts, so the goals screen has something real
+ * to show. The contest target is deliberately included: several seeded students
+ * have no platform that publishes a contest history, which is what makes the
+ * "not measurable" column visible rather than theoretical.
+ */
+async function seedGoals(): Promise<void> {
+  const day = 86_400_000;
+  const goals = [
+    {
+      name: 'Placement readiness',
+      description: 'What the 2023-26 batch should reach before placement season opens.',
+      batch: '2023-26',
+      startsOn: new Date(Date.now() - 60 * day),
+      dueOn: new Date(Date.now() + 45 * day),
+      targets: [
+        { metric: 'PROBLEMS_SOLVED' as const, target: 300 },
+        { metric: 'CONTESTS_ATTENDED' as const, target: 5 },
+      ],
+    },
+    {
+      name: 'Foundations',
+      description: 'A first milestone for every student, whatever their batch.',
+      batch: null,
+      startsOn: new Date(Date.now() - 30 * day),
+      dueOn: new Date(Date.now() + 90 * day),
+      targets: [
+        { metric: 'PROBLEMS_SOLVED' as const, target: 100 },
+        { metric: 'TOPICS_COVERED' as const, target: 10 },
+      ],
+    },
+  ];
+
+  for (const goal of goals) {
+    const existing = await prisma.goal.findFirst({ where: { name: goal.name } });
+    if (existing) continue;
+    await prisma.goal.create({
+      data: { ...goal, targets: { create: goal.targets } },
+    });
+  }
+
+  logger.info(`Seeded ${goals.length} goals`);
+}
+
 async function main() {
   logger.info(`Seeding database (DATA_SOURCE=${env.DATA_SOURCE})`);
   await seedUsers();
@@ -344,6 +389,7 @@ async function main() {
     await fetchAllProfiles(studentIds);
     for (const id of studentIds) await recomputeStudentAnalytics(id);
     await seedHistory(studentIds);
+    await seedGoals();
   } else {
     logger.warn('DATA_SOURCE=live — students were created but no profiles were fetched. Start a refresh job from the admin panel.');
   }

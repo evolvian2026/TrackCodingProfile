@@ -607,3 +607,177 @@ export interface ScheduleStatus {
     finishedAt: string | null;
   }[];
 }
+
+// -- goals -------------------------------------------------------------------
+
+export type GoalMetric = 'PROBLEMS_SOLVED' | 'CONTESTS_ATTENDED' | 'CP_SCORE' | 'CONTEST_RATING' | 'TOPICS_COVERED';
+
+/**
+ * UNKNOWN and NO_DATA are not failure states. A target on a metric a student's
+ * platforms do not publish is unmeasurable for them, and the UI has to keep
+ * saying so rather than colouring it red.
+ */
+export type TargetOutcome = 'MET' | 'BEHIND' | 'UNKNOWN' | 'NO_DATA';
+
+export interface GoalTarget {
+  metric: GoalMetric;
+  label: string;
+  target: number;
+  decimals: number;
+}
+
+export interface GoalProgress {
+  studentsInScope: number;
+  onTrack: number;
+  targets: {
+    metric: GoalMetric;
+    label: string;
+    target: number;
+    met: number;
+    behind: number;
+    unknown: number;
+    noData: number;
+    /** Null when nobody in scope can be measured — never 0. */
+    metRate: number | null;
+    medianRemaining: number | null;
+  }[];
+}
+
+export interface Goal {
+  id: string;
+  name: string;
+  description: string | null;
+  university: string | null;
+  college: string | null;
+  batch: string | null;
+  branch: string | null;
+  section: string | null;
+  scope: string;
+  startsOn: string;
+  dueOn: string;
+  daysLeft: number;
+  isActive: boolean;
+  createdAt: string;
+  createdBy: string | null;
+  targets: GoalTarget[];
+  progress: GoalProgress;
+}
+
+export interface StudentGoal {
+  id: string;
+  name: string;
+  description: string | null;
+  scope: string;
+  startsOn: string;
+  dueOn: string;
+  daysLeft: number;
+  targets: {
+    metric: GoalMetric;
+    label: string;
+    target: number;
+    value: number | null;
+    outcome: TargetOutcome;
+    remaining: number | null;
+    requiredPerWeek: number | null;
+    observedGain: number | null;
+    observedOverDays: number | null;
+  }[];
+}
+
+export interface GoalRosterRow {
+  id: string;
+  studentId: string;
+  name: string;
+  college: string | null;
+  batch: string | null;
+  branch: string | null;
+  targets: {
+    metric: GoalMetric;
+    label: string;
+    target: number;
+    outcome: TargetOutcome;
+    value: number | null;
+    remaining: number | null;
+  }[];
+}
+
+// -- shareable student links --------------------------------------------------
+
+export interface ShareLinkStatus {
+  createdAt: string;
+  createdBy: string | null;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  lastViewedAt: string | null;
+  viewCount: number;
+  active: boolean;
+  /** Always null: the token is stored hashed and cannot be shown again. */
+  url: null;
+}
+
+export interface IssuedShareLink {
+  studentId: string;
+  rollNumber: string;
+  name: string;
+  email: string | null;
+  url: string;
+}
+
+export interface ShareLinkRow {
+  id: string;
+  studentId: string;
+  name: string;
+  college: string | null;
+  batch: string | null;
+  branch: string | null;
+  hasLink: boolean;
+  active: boolean;
+  createdAt: string | null;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  lastViewedAt: string | null;
+  viewCount: number;
+}
+
+/** What a student sees when they open their own link. No account, no PII. */
+export interface SharedProfile {
+  student: {
+    name: string;
+    studentId: string;
+    college: string | null;
+    batch: string | null;
+    branch: string | null;
+    section: string | null;
+  };
+  analytics: StudentAnalytics | null;
+  platforms: (Pick<
+    PlatformProfile,
+    | 'platform'
+    | 'username'
+    | 'profileUrl'
+    | 'status'
+    | 'statusMessage'
+    | 'lastSuccessAt'
+    | 'totalSolved'
+    | 'easySolved'
+    | 'mediumSolved'
+    | 'hardSolved'
+    | 'rating'
+    | 'maxRating'
+    | 'contestsAttended'
+    | 'globalRank'
+  > & {
+    label: string;
+    color: string;
+    colorDark: string;
+    capabilities: { hasDifficultyBreakdown: boolean; hasContests: boolean; hasTopics: boolean };
+  })[];
+  unlinkedPlatforms: { platform: Platform; label: string }[];
+  skills: { topic: string; level: SkillLevel; score: number; problemsSolved: number }[];
+  topics: { topic: string; problemsSolved: number }[];
+  history: { capturedAt: string; totalSolved: number | null; cpScore: number | null; rating: number | null; contestsAttended: number | null }[];
+  goals: StudentGoal[];
+  concerns: { type: string; severity: AlertSeverity; message: string; detectedAt: string }[];
+  rank: { position: number; of: number; scope: string } | null;
+  lastRefreshedAt: string | null;
+}

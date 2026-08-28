@@ -30,6 +30,10 @@ const schema = z.object({
   // CORS / web
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
   TRUST_PROXY: bool(false),
+  /// Where the SPA is served from, used to build shareable student links.
+  /// Defaults to the first allowed CORS origin, which is right in every
+  /// single-origin deployment.
+  APP_BASE_URL: z.string().default(''),
 
   // Queue
   QUEUE_DRIVER: z.enum(['redis', 'inline']).default('inline'),

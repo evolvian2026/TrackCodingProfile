@@ -16,6 +16,8 @@ import { leaderboardRouter } from './modules/analytics/leaderboard.routes.js';
 import { reportsRouter } from './modules/reports/report.routes.js';
 import { settingsRouter } from './modules/settings/settings.routes.js';
 import { alertsRouter, scheduleRouter } from './modules/alerts/alerts.routes.js';
+import { goalsRouter } from './modules/goals/goals.routes.js';
+import { publicShareRouter, shareAdminRouter, studentShareRouter } from './modules/share/share.routes.js';
 import { prisma } from './db/prisma.js';
 
 export function createApp() {
@@ -90,6 +92,13 @@ export function createApp() {
   app.use('/api/settings', settingsRouter);
   app.use('/api/alerts', alertsRouter);
   app.use('/api/schedule', scheduleRouter);
+  app.use('/api/goals', goalsRouter);
+  // Deliberately unauthenticated: a student opening their own link has no
+  // account. It carries its own tighter rate limit and returns only that one
+  // student's record.
+  app.use('/api/shared', publicShareRouter);
+  app.use('/api/students', studentShareRouter);
+  app.use('/api/share-links', shareAdminRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

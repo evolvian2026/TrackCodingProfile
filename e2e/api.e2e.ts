@@ -682,6 +682,190 @@ async function main() {
       reset.status === 200 && reset.body.data.value.inactivityDays === 21 && reset.body.realerted > 0, reset.body);
   }
 
+  // ----------------------------------------------------------------- goals
+  section('Goals');
+  let goalId = '';
+  {
+    const metrics = await call('GET', '/api/goals/metrics');
+    check('the metric catalogue lists all five metrics', (metrics.body?.data ?? []).length === 5, metrics.body?.data);
+    check('each metric says how many decimals it carries',
+      (metrics.body?.data ?? []).every((m: any) => typeof m.decimals === 'number'), metrics.body?.data);
+
+    const body = (overrides: Record<string, unknown> = {}) => ({
+      name: 'E2E placement readiness',
+      description: 'Set by the end-to-end suite.',
+      batch: '2023-26',
+      startsOn: new Date(Date.now() - 30 * 86_400_000).toISOString(),
+      dueOn: new Date(Date.now() + 60 * 86_400_000).toISOString(),
+      targets: [
+        { metric: 'PROBLEMS_SOLVED', target: 200 },
+        { metric: 'CONTESTS_ATTENDED', target: 3 },
+      ],
+      ...overrides,
+    });
+
+    const viewerCreate = await call('POST', '/api/goals', { token: viewerToken, body: body() });
+    check('a viewer cannot create a goal (403)', viewerCreate.status === 403, viewerCreate.status);
+
+    const created = await call('POST', '/api/goals', { body: body() });
+    check('a trainer can create a goal', created.status === 201, created.body);
+    goalId = created.body?.data?.id ?? '';
+    check('the goal names the cohort it applies to', created.body?.data?.scope === '2023-26', created.body?.data?.scope);
+    check('the goal reports how long is left', typeof created.body?.data?.daysLeft === 'number', created.body?.data?.daysLeft);
+    check('progress is computed on creation',
+      created.body?.data?.progress?.studentsInScope > 0, created.body?.data?.progress);
+
+    const backwards = await call('POST', '/api/goals', { body: body({ dueOn: new Date(Date.now() - 90 * 86_400_000).toISOString() }) });
+    check('a goal due before it starts is a 400', backwards.status === 400, backwards.body?.error?.message);
+
+    const targetless = await call('POST', '/api/goals', { body: body({ targets: [] }) });
+    check('a goal with no targets is a 400 — it would measure nothing', targetless.status === 400, targetless.status);
+
+    const badMetric = await call('POST', '/api/goals', { body: body({ targets: [{ metric: 'VIBES', target: 1 }] }) });
+    check('an unknown metric is rejected', badMetric.status === 400, badMetric.status);
+
+    const list = await call('GET', '/api/goals');
+    const goal = (list.body?.data ?? []).find((g: any) => g.id === goalId);
+    check('the goal appears in the list with its progress', Boolean(goal?.progress), list.status);
+
+    const targets = goal?.progress?.targets ?? [];
+    check('every target reports met, behind, unknown and no-data separately',
+      targets.every((t: any) => ['met', 'behind', 'unknown', 'noData'].every((k) => typeof t[k] === 'number')), targets[0]);
+    check('the met rate is measured over the students it is measurable for',
+      targets.every((t: any) => t.metRate === null || Math.abs(t.metRate - (t.met / Math.max(1, t.met + t.behind)) * 100) < 0.11),
+      targets.map((t: any) => ({ rate: t.metRate, met: t.met, behind: t.behind })));
+    check('students who cannot be measured are never counted as behind',
+      targets.every((t: any) => t.met + t.behind + t.unknown + t.noData === goal.progress.studentsInScope), targets[0]);
+    check('"on track" never exceeds the cohort',
+      goal.progress.onTrack <= goal.progress.studentsInScope, goal.progress);
+
+    // Every cohort figure has to open into the names behind it.
+    const roster = await call('GET', `/api/goals/${goalId}/students`);
+    check('the roster lists the students in scope', (roster.body?.data ?? []).length > 0, roster.status);
+    check('each roster row carries an outcome per target',
+      (roster.body?.data ?? []).every((r: any) => r.targets.every((t: any) => ['MET', 'BEHIND', 'UNKNOWN', 'NO_DATA'].includes(t.outcome))),
+      roster.body?.data?.[0]);
+
+    const behind = await call('GET', `/api/goals/${goalId}/students?metric=PROBLEMS_SOLVED&outcome=BEHIND`);
+    check('the roster can be filtered to one outcome',
+      (behind.body?.data ?? []).every((r: any) => r.targets[0].outcome === 'BEHIND'), behind.body?.data?.[0]);
+
+    const unmeasured = await call('GET', `/api/goals/${goalId}/students?outcome=UNKNOWN`);
+    check('the unmeasurable students are reachable too, not hidden', unmeasured.status === 200, unmeasured.status);
+
+    const impossible = await call('PATCH', `/api/goals/${goalId}`, {
+      body: { targets: [{ metric: 'PROBLEMS_SOLVED', target: 999_999 }] },
+    });
+    check('editing replaces the targets wholesale', impossible.body?.data?.targets?.length === 1, impossible.body?.data?.targets);
+    check('nobody meets an impossible target', impossible.body?.data?.progress?.onTrack === 0, impossible.body?.data?.progress);
+
+    const student = await call('GET', `/api/students/${studentId}/goals`);
+    check('a student sees the goals that cover them', Array.isArray(student.body?.data), student.status);
+    const covering = (student.body?.data ?? []).find((g: any) => g.id === goalId);
+    if (covering) {
+      check('a student behind a target is told the weekly pace that closes it',
+        covering.targets.every((t: any) => t.outcome !== 'BEHIND' || typeof t.requiredPerWeek === 'number'),
+        covering.targets);
+      check('an unmeasurable target carries no shortfall figure',
+        covering.targets.every((t: any) => t.outcome !== 'UNKNOWN' || (t.remaining === null && t.value === null)),
+        covering.targets);
+    }
+
+    const archived = await call('PATCH', `/api/goals/${goalId}`, { body: { isActive: false } });
+    check('a goal can be archived', archived.body?.data?.isActive === false, archived.body?.data);
+    check('archived goals leave the default list',
+      !((await call('GET', '/api/goals')).body?.data ?? []).some((g: any) => g.id === goalId));
+    check('archived goals are still retrievable on request',
+      ((await call('GET', '/api/goals?includeInactive=true')).body?.data ?? []).some((g: any) => g.id === goalId));
+    check('an archived goal stops appearing on a student page',
+      !((await call('GET', `/api/students/${studentId}/goals`)).body?.data ?? []).some((g: any) => g.id === goalId));
+
+    await call('PATCH', `/api/goals/${goalId}`, { body: { isActive: true } });
+  }
+
+  // ------------------------------------------------------- student view links
+  section('Student view links');
+  {
+    const viewerIssue = await call('POST', `/api/students/${studentId}/share-link`, { token: viewerToken, body: {} });
+    check('a viewer cannot issue a link (403)', viewerIssue.status === 403, viewerIssue.status);
+
+    const issued = await call('POST', `/api/students/${studentId}/share-link`, { body: {} });
+    check('a trainer can issue a link', issued.status === 201, issued.body);
+    check('the response says the link cannot be shown again', /cannot be shown again/i.test(issued.body?.message ?? ''), issued.body?.message);
+
+    const shareToken = (issued.body?.data?.url ?? '').split('/me/')[1] ?? '';
+    check('the link is a URL with a long random token', shareToken.length >= 40, shareToken.length);
+
+    // The whole point: no Authorization header.
+    const view = await call('GET', `/api/shared/${shareToken}`, { auth: false });
+    check('the link opens without signing in', view.status === 200, view.status);
+    check('it shows that student', Boolean(view.body?.data?.student?.name), view.body?.data?.student);
+    check('it carries their platforms with real statuses',
+      (view.body?.data?.platforms ?? []).every((p: any) => typeof p.status === 'string'), view.body?.data?.platforms?.[0]);
+    check('it carries their goals', Array.isArray(view.body?.data?.goals), view.body?.data?.goals);
+    check('it carries their history for a progress chart', Array.isArray(view.body?.data?.history));
+
+    const serialized = JSON.stringify(view.body?.data);
+    check('it never exposes an email address', !/@[a-z]+\.(edu|com)/i.test(serialized), serialized.slice(0, 200));
+    check('it never exposes internal notes or a phone number',
+      !/"notes"|"phone"/.test(serialized));
+    check('it names no other student',
+      !(await call('GET', '/api/students?pageSize=200')).body.data
+        .filter((s: any) => s.id !== studentId)
+        .some((s: any) => serialized.includes(s.name)));
+
+    // Position without identities is motivating; identities would be exposing.
+    check('a ranked student is told their position, not who is above them',
+      view.body?.data?.rank === null || typeof view.body.data.rank.position === 'number', view.body?.data?.rank);
+
+    const status = await call('GET', `/api/students/${studentId}/share-link`);
+    check('the status says the link is active', status.body?.data?.active === true, status.body?.data);
+    check('the status cannot hand the link back', status.body?.data?.url === null, status.body?.data);
+
+    const regenerated = await call('POST', `/api/students/${studentId}/share-link`, { body: {} });
+    const newToken = (regenerated.body?.data?.url ?? '').split('/me/')[1];
+    check('regenerating issues a different link', newToken !== shareToken);
+    check('the old link stops working', (await call('GET', `/api/shared/${shareToken}`, { auth: false })).status === 404);
+    check('the new link works', (await call('GET', `/api/shared/${newToken}`, { auth: false })).status === 200);
+
+    const revoked = await call('DELETE', `/api/students/${studentId}/share-link`);
+    check('a link can be revoked', revoked.status === 204, revoked.status);
+
+    const afterRevoke = await call('GET', `/api/shared/${newToken}`, { auth: false });
+    const neverExisted = await call('GET', '/api/shared/definitely-not-a-real-token', { auth: false });
+    check('a revoked link stops working', afterRevoke.status === 404);
+    check('revoked and never-issued give the same answer, so the link leaks nothing',
+      afterRevoke.body?.error?.message === neverExisted.body?.error?.message, afterRevoke.body?.error?.message);
+
+    const pastExpiry = await call('POST', `/api/students/${studentId}/share-link`, {
+      body: { expiresAt: new Date(Date.now() - 1000).toISOString() },
+    });
+    check('an expiry date in the past is a 400', pastExpiry.status === 400, pastExpiry.status);
+
+    const bulk = await call('POST', '/api/share-links', { body: { scope: 'filtered', batch: '2023-26' } });
+    check('links can be issued for a whole cohort', bulk.status === 201 && bulk.body.issued > 0, bulk.body);
+    check('every issued link carries the roll number a mail merge keys on',
+      (bulk.body?.data ?? []).every((l: any) => l.rollNumber && l.url), bulk.body?.data?.[0]);
+
+    const again = await call('POST', '/api/share-links', { body: { scope: 'filtered', batch: '2023-26' } });
+    check('a second pass does not disturb links already in circulation',
+      again.body?.issued === 0 && again.body?.skipped > 0, again.body);
+
+    const forced = await call('POST', '/api/share-links', {
+      body: { scope: 'filtered', batch: '2023-26', regenerateExisting: true },
+    });
+    check('regenerating in bulk is possible but has to be asked for', forced.body?.issued > 0, forced.body);
+
+    const nobody = await call('POST', '/api/share-links', { body: { scope: 'selected', studentIds: [] } });
+    check('a bulk issue with nobody selected is a 400', nobody.status === 400, nobody.status);
+
+    const listing = await call('GET', '/api/share-links?batch=2023-26');
+    check('the coordinator can see who has a link', (listing.body?.data ?? []).length > 0, listing.status);
+    check('the listing reports usage without exposing the links',
+      (listing.body?.data ?? []).every((r: any) => typeof r.viewCount === 'number' && !('url' in r)), listing.body?.data?.[0]);
+    check('the listing says which base URL links are built from', typeof listing.body?.baseUrl === 'string', listing.body?.baseUrl);
+  }
+
   // --------------------------------------------------------------- reports
   section('Reports');
   {
