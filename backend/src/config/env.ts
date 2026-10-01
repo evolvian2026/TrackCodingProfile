@@ -30,6 +30,13 @@ const schema = z.object({
   // CORS / web
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
   TRUST_PROXY: bool(false),
+  /// Serve the built SPA from this process, so the app runs as one origin on
+  /// one host. That is not just convenience: the refresh cookie is
+  /// SameSite=Strict, so an SPA on a different site than the API never sends
+  /// it and every session would die when the access token expires.
+  SERVE_WEB: bool(false),
+  /// Where the built SPA lives, relative to the backend working directory.
+  WEB_DIST_DIR: z.string().default('../frontend/dist'),
   /// Where the SPA is served from, used to build shareable student links.
   /// Defaults to the first allowed CORS origin, which is right in every
   /// single-origin deployment.

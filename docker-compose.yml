@@ -2,8 +2,13 @@
 #
 #   cp .env.example .env      # then set JWT_SECRET and POSTGRES_PASSWORD
 #   docker compose up --build
-#   docker compose exec api npm run db:migrate
-#   docker compose exec api npm run db:seed
+#
+# That is the whole sequence. The `migrate` service applies the schema before
+# the API or worker start, so there is no manual step and no window in which
+# the app is serving a database that has no tables.
+#
+# To load the 24 sample students as well:
+#   docker compose run --rm migrate npm run db:seed:prod --workspace=backend
 #
 # The app is then on http://localhost:8080
 
@@ -39,7 +44,30 @@ services:
       timeout: 5s
       retries: 10
 
+  # Applies the schema once and exits. Having a service own this means the API
+  # and the worker cannot race each other to migrate, and a failed migration
+  # stops the stack instead of leaving the app to serve an empty database.
+  migrate:
+    image: tcp-backend:local
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ['npm', 'run', 'db:migrate', '--workspace=backend']
+    working_dir: /app
+    restart: 'no'
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tcp}:${POSTGRES_PASSWORD:-tcp}@postgres:5432/${POSTGRES_DB:-tcp}?schema=public
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
+      DATA_SOURCE: ${DATA_SOURCE:-mock}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@tracker.local}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-Admin@12345}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+
   api:
+    image: tcp-backend:local
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -47,6 +75,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
     environment:
       NODE_ENV: production
       PORT: 4000
@@ -57,8 +86,11 @@ services:
       RUN_WORKER_IN_API: 'false'
       DATA_SOURCE: ${DATA_SOURCE:-mock}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
-      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8080}
-      APP_BASE_URL: ${APP_BASE_URL:-}
+      # Deliberately NOT ${CORS_ORIGIN}: .env sets that to Vite's dev port for
+      # local work, and `:-` would not override it. In Docker the browser is on
+      # WEB_ORIGIN, so a stale 5173 here rejects every request the SPA makes.
+      CORS_ORIGIN: ${WEB_ORIGIN:-http://localhost:8080}
+      APP_BASE_URL: ${WEB_ORIGIN:-http://localhost:8080}
       TRUST_PROXY: 'true'
       SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@tracker.local}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-Admin@12345}
@@ -69,14 +101,16 @@ services:
       - '${API_PORT:-4000}:4000'
 
   worker:
+    image: tcp-backend:local
     build:
       context: .
       dockerfile: backend/Dockerfile
     restart: unless-stopped
-    command: ['node', 'dist/worker.js']
+    command: ['node', 'dist/src/worker.js']
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-tcp}:${POSTGRES_PASSWORD:-tcp}@postgres:5432/${POSTGRES_DB:-tcp}?schema=public
@@ -95,7 +129,9 @@ services:
       dockerfile: frontend/Dockerfile
     restart: unless-stopped
     depends_on:
-      - api
+      # Healthy, not merely started: nginx resolves the api hostname when it
+      # loads its config, so starting first turns a slow API into a dead proxy.
+      api: { condition: service_healthy }
     ports:
       - '${WEB_PORT:-8080}:80'
 

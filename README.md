@@ -15,7 +15,9 @@ platform rate-limited us, that is recorded and displayed as such — never as `0
 - [Quick start](#quick-start)
 - [What the platforms actually publish](#what-the-platforms-actually-publish)
 - [Data integrity](#data-integrity)
+- [The database](#the-database)
 - [Architecture](#architecture)
+- [Deploying](#deploying)
 - [Configuration](#configuration)
 - [Importing students](#importing-students)
 - [Processing and rate limiting](#processing-and-rate-limiting)
@@ -41,15 +43,28 @@ cp .env.example .env
 sed -i "s|^JWT_SECRET=.*|JWT_SECRET=$(openssl rand -hex 32)|" .env
 
 docker compose up --build -d
-docker compose exec api npm run db:migrate
-docker compose exec api npm run db:seed
+```
+
+That is the whole sequence. A one-shot `migrate` service applies the schema
+before the API and the worker start, so there is no manual migration step and
+no window in which the app is serving a database with no tables.
+
+To load the 24 sample students as well:
+
+```bash
+docker compose run --rm migrate npm run db:seed:prod --workspace=backend
 ```
 
 Open <http://localhost:8080> and sign in with the seeded administrator
 (`admin@tracker.local` / `Admin@12345` unless you changed it in `.env`).
 
-The stack runs PostgreSQL, Redis, the API, a separate background worker, and
-nginx serving the built SPA.
+The stack runs PostgreSQL, Redis, a one-shot migration step, the API, a separate
+background worker, and nginx serving the built SPA. The API, worker and
+migration step share one image, so it is built once.
+
+If the stack does not come up, `docker compose logs api` and
+`docker compose logs migrate` say why; the migration service fails loudly rather
+than letting the app start against an unmigrated database.
 
 ### Locally, without Docker
 
@@ -162,6 +177,71 @@ from leaderboards and averages rather than ranked as zero.
 
 ---
 
+## The database
+
+**PostgreSQL, with Prisma as the schema owner and query layer.** There is no
+other store: job state, cached platform responses, analytics and historical
+snapshots all live in Postgres, which is why `QUEUE_DRIVER=inline` needs no
+Redis at all.
+
+### Where the schema comes from
+
+[`backend/prisma/schema.prisma`](backend/prisma/schema.prisma) is the single
+source of truth — 24 tables covering students, per-platform profiles, problems,
+topics, contests, ratings, snapshots, jobs, analytics, alerts, goals and share
+links. Every change to it is a numbered migration in
+`backend/prisma/migrations/`, applied with:
+
+```bash
+npm run db:migrate --workspace=backend        # prisma migrate deploy — production safe
+npm run db:migrate:dev --workspace=backend    # creates a new migration from schema edits
+```
+
+`migrate deploy` only ever applies pending migrations, never rewrites history,
+so it is what runs in Docker and in any deployment.
+
+### Looking at the tables
+
+```bash
+npm run db:studio --workspace=backend   # Prisma Studio on :5555 — browse and edit every table
+```
+
+Prisma Studio is the quickest option and needs nothing installed. For SQL:
+
+```bash
+psql "$DATABASE_URL"                          # local
+docker compose exec postgres psql -U tcp tcp  # inside the Docker stack
+\dt                                           # list tables
+select count(*) from students;
+```
+
+Any standard client works too — pgAdmin, DBeaver, TablePlus, DataGrip — pointed
+at the `DATABASE_URL` host, port, database, user and password.
+
+### Persistence
+
+| Where it runs | What holds the data | Survives |
+|---|---|---|
+| Docker Compose | named volume `postgres-data` | `docker compose down`, restarts, image rebuilds |
+| Docker Compose | named volume `redis-data` | the same (queue state, append-only) |
+| Docker Compose | named volume `uploads` | the same (uploaded spreadsheets) |
+| Local, no Docker | your own PostgreSQL data directory | whatever your install does |
+| Managed host | the provider's volume or managed Postgres | per that provider |
+
+`docker compose down` keeps all three volumes. **`docker compose down -v`
+deletes them** — that is the one command that destroys your data. To reset
+deliberately:
+
+```bash
+docker compose down -v && docker compose up --build -d
+```
+
+Uploaded spreadsheets are the only state outside Postgres. They are kept so a
+failed import can be re-examined; nothing reads them after a job finishes, so
+the volume can be cleared without affecting any dashboard.
+
+---
+
 ## Architecture
 
 ```
@@ -217,7 +297,7 @@ backend/
     goals.service.ts          Target measurement, including the unmeasurable cases
     share.service.ts          Hashed read-only links and the student's own view
   src/queue/                  Redis and in-process drivers behind one interface
-  tests/                      208 tests
+  tests/                      219 tests
 frontend/
   src/api/                    Typed client with silent token refresh
   src/components/             Shared UI and chart primitives
@@ -253,6 +333,80 @@ external lock, and a restart cannot re-fire a slot that already went.
 thresholds and returns concerns; nothing in it touches the database. Every rule,
 including the ordering that stops a stale-data gap being reported as a student
 failing to progress, is tested directly against fabricated histories.
+
+---
+
+## Deploying
+
+The app can run as **one container** — the API serves the built SPA from its own
+process and drains the queue in-process, so a deployment needs exactly one web
+service and one Postgres. That is the shape free hosting tiers are built for.
+
+```bash
+docker build -t tracker .
+docker run -p 4000:4000 \
+  -e DATABASE_URL="postgresql://…" \
+  -e JWT_SECRET="$(openssl rand -hex 32)" \
+  -e APP_BASE_URL="https://your-app.example.com" \
+  -e CORS_ORIGIN="https://your-app.example.com" \
+  tracker
+```
+
+The container migrates itself on boot (`prisma migrate deploy`, which is a no-op
+when the schema is current). Add `SEED_ON_START=true` to load the 24 sample
+students — the seed upserts, so it is safe on every restart.
+
+### Why one origin rather than two
+
+Hosting the SPA on a static host and the API elsewhere looks tidier and
+**breaks sessions**. The refresh token lives in a `SameSite=Strict` cookie,
+which is the correct setting — and it means a browser on `app.example.com` will
+not send that cookie to `api.example.net`. Logins would appear to work and then
+every user would be signed out when their 30-minute access token expired.
+
+Serving both from one origin removes the problem instead of weakening the
+cookie. If you do split them, you need a shared parent domain and
+`sameSite: 'lax'` or `'none'` — a deliberate trade, not a default.
+
+### A free setup that works
+
+| Piece | Service | Notes |
+|---|---|---|
+| App (one container) | **Render** free web service | Spins down after 15 minutes idle; ~1 minute cold start. 750 instance-hours/month per workspace. |
+| Database | **Neon** free Postgres | Permanent free tier, 0.5 GB per project, scales to zero. No card. |
+| Queue | none needed | `QUEUE_DRIVER=inline` keeps job state in Postgres. |
+
+Render's own free Postgres **expires 30 days after creation**, which is why the
+database belongs on Neon for anything you want to leave up. Point
+`DATABASE_URL` at the Neon connection string and Render at this repo's root
+`Dockerfile`.
+
+Set these on the web service: `DATABASE_URL`, `JWT_SECRET`,
+`APP_BASE_URL` and `CORS_ORIGIN` (both the Render URL),
+`DATA_SOURCE=mock` for a showcase, and `SEED_ON_START=true` for the first boot.
+
+**Two things to expect on a free tier**, both worth knowing before you demo it:
+
+- **The first visit after an idle period takes about a minute** while the
+  service wakes. Open it yourself before showing anyone.
+- **The scheduled refresh only fires while the process is alive.** The scheduler
+  is a 60-second interval inside the app, so a spun-down free instance simply
+  misses its slot; the grace window means it runs on the next wake if that is
+  within 12 hours. Harmless with `DATA_SOURCE=mock`, worth paying for a
+  warm instance if you are tracking real profiles.
+
+### Other options
+
+- **Railway** — supports this Dockerfile directly and does not spin down. The
+  permanent free plan grants only $1/month of credit after its trial, so in
+  practice it is the $5/month Hobby plan.
+- **Fly.io** — deploys the Dockerfile well and does not sleep, but no longer has
+  an ongoing free allowance for new accounts.
+- **Any VPS** — `docker compose up -d` gives you the full split stack with Redis
+  and a separate worker, which is the right shape once real refreshes matter.
+
+A static host such as Vercel, Netlify or Cloudflare Pages can serve the SPA, but
+only alongside an API on the same origin — see the cookie note above.
 
 ---
 
@@ -534,19 +688,20 @@ Two layers: fast tests that need no server, and end-to-end suites that drive the
 running application.
 
 ```bash
-npm test          # 208 unit + integration tests
+npm test          # 219 unit + integration tests
 npm run e2e       # 436 end-to-end checks against a running app
 ```
 
 ### Unit and integration
 
-208 tests covering topic normalization, scoring and skill levels, all four
+219 tests covering topic normalization, scoring and skill levels, all four
 platform parsers, rate limiting and backoff, Excel reading and column mapping,
 row validation, schedule arithmetic across time zones and daylight saving, every
 needs-attention rule, goal measurement including the unmeasurable cases, share
 link issuing and revocation, the full upload → process → analytics pipeline
-against a real database, and the REST API including authentication and
-authorization.
+against a real database, the REST API including authentication and
+authorization, and a static contract check that the paths the Dockerfiles and
+start scripts invoke are the ones the build actually emits.
 
 Tests never touch a real platform — `DATA_SOURCE=mock` is forced in
 `tests/setup.ts`.
@@ -605,6 +760,24 @@ End-to-end found three more that unit tests structurally could not:
   share-link admin routes at `/api` put a blanket auth check in front of the
   whole prefix, so "no such route" became "you are not signed in". They are
   mounted on their own paths now.
+- **The Docker stack could never have started.** `tsconfig` keeps `rootDir` at
+  the package root so `prisma/seed.ts` compiles too, which means the build emits
+  `dist/src/index.js` — but the Dockerfile ran `node dist/index.js` and compose
+  ran `node dist/worker.js`. Both crash-looped on `MODULE_NOT_FOUND`. Every one
+  of the 200-plus tests passed throughout, because they all run the TypeScript
+  sources through `tsx` and never touch the compiled output. There is now a
+  static contract test asserting that every path a container invokes is a path
+  the build produces.
+- **The documented migrate and seed commands could not run either.** `prisma`
+  and `tsx` are devDependencies and the runtime image installs with
+  `--omit=dev`, so `docker compose exec api npm run db:migrate` would have
+  failed with "prisma: not found". The CLI is now a runtime dependency, a
+  one-shot `migrate` service applies the schema before the app starts, and
+  production seeding runs the compiled seed.
+- **Docker would have rejected every request the SPA made.** `.env.example` sets
+  `CORS_ORIGIN` to Vite's dev port, and compose's `:-` default could not
+  override a value that was set, so the API allow-listed `:5173` while the
+  browser was on `:8080`. Compose now reads a separate `WEB_ORIGIN`.
 
 ---
 
